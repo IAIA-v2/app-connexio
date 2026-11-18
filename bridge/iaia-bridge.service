@@ -4,7 +4,9 @@ After=network-online.target ovos-messagebus.service
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/.venvs/ovos/bin/python %h/iaia-bridge.py
+ExecStart=%h/.venvs/ovos/bin/python -u %h/iaia-bridge.py
+StandardOutput=append:%h/.local/state/mycroft/iaia-bridge.log
+StandardError=append:%h/.local/state/mycroft/iaia-bridge.log
 Restart=always
 RestartSec=5
 

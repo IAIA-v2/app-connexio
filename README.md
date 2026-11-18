@@ -62,23 +62,33 @@ Quedará en `https://<USUARIO>.github.io/<REPO>/` (HTTPS, requisito de PWA y de 
 
 > No subas nunca credenciales: se escriben en Ajustes y quedan solo en el móvil.
 
-## Conexión real (cuando haya broker)
+## Instalar el puente en la Raspberry (instalador interactivo)
 
-1. **Broker MQTT con WebSocket seguro**: HiveMQ Cloud o EMQX Cloud (plan gratuito) o Mosquitto propio detrás de TLS. Crea un usuario para el puente y otro para la app, con permisos solo sobre `iaia/<id>/#` (la app: leer `status`/`ack`, escribir `cmd`).
-2. **En la Pi** (`rasp5ovos`), siguiendo las reglas del proyecto:
-   ```bash
-   ~/.venvs/ovos/bin/python -c "import paho.mqtt; print(paho.mqtt.__version__)"   # ¿ya está?
-   uv pip install --dry-run paho-mqtt     # revisa que NO baje ovos-workshop, ovos-bus-client, padacioso, ovos-core, ovos-utils ni ovos-plugin-manager
-   ```
-   Si el dry-run es limpio, instala, y después `pip check | grep -iE "workshop|bus-client|padacioso"`.
-3. Copia `bridge/iaia-bridge.py` a `~/`, crea `~/.config/iaia-bridge.json` (plantilla en el docstring, `chmod 600`) y activa:
-   ```bash
-   cp bridge/iaia-bridge.service ~/.config/systemd/user/
-   systemctl --user daemon-reload && systemctl --user enable --now iaia-bridge
-   systemctl --user status iaia-bridge -n 30 --no-pager
-   ```
-4. Añade `~/iaia-bridge.py` y la unidad a `FILES` en `~/iaia-sync.sh` (el JSON de credenciales **no**).
-5. En la app: **Ajustes → Conexión real**, URL `wss://…`, usuario, contraseña.
+Como usuario `ovos` (sin sudo), en la Pi:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/IAIA-v2/app-connexio/main/install.sh | bash
+```
+
+Si el repositorio es privado, hace falta un token con permiso de lectura de contenido:
+
+```bash
+curl -fsSL -H "Authorization: Bearer <TOKEN>" https://raw.githubusercontent.com/IAIA-v2/app-connexio/main/install.sh | GITHUB_TOKEN=<TOKEN> bash
+```
+
+El instalador pregunta los datos del broker (servidor, puerto, TLS, usuario, contraseña y prefijo), genera el código `IAIA-XXXX-XXXX` del equipo y, al terminar, muestra la **wifi (SSID)** a la que está conectada la Pi, su IP, el **código** y su **código QR**.
+
+Qué comprueba y protege:
+
+* Instala `paho-mqtt` solo si falta, y antes hace un `--dry-run`: si toca `ovos-workshop`, `ovos-bus-client`, `padacioso`, `ovos-core`, `ovos-utils` o `ovos-plugin-manager`, se detiene sin instalar. Después compara las versiones y ejecuta `pip check`.
+* Hace copia de seguridad (`.bak-FECHA`) de lo que reemplaza.
+* La configuración queda en `~/.config/iaia-bridge.json` con permisos 600; la contraseña no se muestra al escribirla.
+* Es repetible: si ya existe configuración, ofrece conservarla.
+* Para quitarlo: `bash install.sh --uninstall` (y `--purge` para borrar también la configuración).
+
+Después, en el broker: permisos para el usuario del puente sobre `iaia/<CODIGO>/#` y, para la app, lectura de `status` y `ack` y escritura de `cmd`. En la app: **Ajustes → Conexión real** y **Añadir** con el código.
+
+El log del puente está en `~/.local/state/mycroft/iaia-bridge.log`. Añade `~/iaia-bridge.py` y la unidad a `FILES` en `~/iaia-sync.sh` (nunca el JSON de credenciales).
 
 ## Pendiente / siguientes pasos
 
