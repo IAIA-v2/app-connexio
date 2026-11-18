@@ -97,7 +97,8 @@ class Mqtt {
   async start() {
     this.stop(); setConn('off', 'Conectando…');
     const s = S.settings;
-    if (!/^wss:\/\//i.test(s.url)) { setConn('err', 'Indica una URL wss:// del broker (Ajustes).'); return; }
+    const okUrl = /^wss:\/\//i.test(s.url) || (/^ws:\/\//i.test(s.url) && location.protocol === 'http:');
+    if (!okUrl) { setConn('err', location.protocol === 'http:' ? 'Indica una URL ws:// o wss:// del broker (Ajustes).' : 'Indica una URL wss:// del broker (Ajustes). ws:// solo vale si la app se abre por http (pruebas en la red local).'); return; }
     try { await loadMqttLib(); } catch (e) { setConn('err', e.message); return; }
     this.c = window.mqtt.connect(s.url, { username: s.user || undefined, password: s.pass || undefined,
       clientId: 'iaia-pwa-' + uid(), reconnectPeriod: 3000, connectTimeout: 8000, clean: true });
