@@ -1,0 +1,12 @@
+[Unit]
+Description=Iaia bridge (MQTT <-> OVOS)
+After=network-online.target ovos-messagebus.service
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.venvs/ovos/bin/python %h/iaia-bridge.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
