@@ -90,6 +90,19 @@ Después, en el broker: permisos para el usuario del puente sobre `iaia/<CODIGO>
 
 El log del puente está en `~/.local/state/mycroft/iaia-bridge.log`. Añade `~/iaia-bridge.py` y la unidad a `FILES` en `~/iaia-sync.sh` (nunca el JSON de credenciales).
 
+## Servidor MQTT en una instancia (EC2 de AWS u otra)
+
+`broker/setup-mosquitto.sh` monta un broker Mosquitto con TLS (Let's Encrypt) y WebSocket seguro en un Ubuntu 22.04/24.04. Requisitos previos: una instancia con IP fija, un nombre DNS (`mqtt.<TU_DOMINIO>`) que apunte a ella y el Security Group abierto en los puertos 22 (solo tu IP), 80, 8883 y 8884.
+
+```bash
+curl -fsSL -O https://raw.githubusercontent.com/IAIA-v2/app-connexio/main/broker/setup-mosquitto.sh
+sudo bash setup-mosquitto.sh
+```
+
+El script pregunta el dominio, el prefijo y los puertos, instala Mosquitto y certbot, configura los dos listeners y da de alta la primera Iaia. Crea un usuario de puente por Iaia (`pi-<CODIGO>`, solo sus temas) y usuarios de la app que solo pueden leer `status` y `ack` y escribir `cmd` de las Iaias a las que se les da acceso. Al terminar hace una prueba de publicar y suscribirse con TLS.
+
+Otras opciones: `--add-device`, `--add-app-user`, `--grant USUARIO CODIGO`, `--remove-device CODIGO` y `--list`. El fichero de permisos (`/etc/mosquitto/acl`) se regenera desde `/etc/mosquitto/iaia/`; no se edita a mano.
+
 ## Pendiente / siguientes pasos
 
 * Pairing real: el código no debe ser el identificador y el secreto a la vez. Producción: código de un solo uso canjeado en la nube por credenciales propias del móvil.
