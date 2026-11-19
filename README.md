@@ -107,6 +107,23 @@ Otras opciones: `--add-device`, `--add-app-user`, `--grant USUARIO CODIGO`, `--r
 
 En la ficha de cada dispositivo, el botón **Ping** envía `{"id","type":"ping","ts"}` a `iaia/<id>/cmd` y espera en `iaia/<id>/ack` la respuesta `{"id","stage":"pong","ok":true,"bus":true,"ver":"0.1"}`. Mide el tiempo de ida y vuelta, no hace hablar a Iaia y da error si no hay pong en 8 segundos. `bus:false` indica que el puente está vivo pero no llega a OVOS. Hay que actualizar también el puente en la Raspberry (`install.sh` lo vuelve a descargar).
 
+## Llamada: decir, escuchar y recibir la respuesta
+
+En la ficha del dispositivo, **📞 Llamar y esperar respuesta** hace esto:
+
+1. La app envía `{"type":"ask","text":...}` a `iaia/<id>/cmd`.
+2. Iaia dice el mensaje en voz alta.
+3. Se queda escuchando **una sola respuesta**, sin que la persona diga «yaya».
+4. Lo que entiende el STT vuelve a la app como burbuja bajo el mensaje.
+
+Estados que ve el familiar: Enviando, Recibido, Dicho, Escuchando, Respondió o Sin respuesta (si la persona no dice nada).
+
+Cómo está hecho: el puente (`bridge/iaia-bridge.py`) no puede escuchar por sí solo, así que habla con una skill de OVOS, `skill/ovos-skill-iaia-familia`, por el bus (`iaia.familia.ask` y respuestas). La skill usa `get_response()`, que captura la respuesta por el mecanismo `converse`. Lo que diga la persona **no llega al LLM ni a otras skills**. `install.sh` ofrece instalarla: simula la instalación (`--dry-run --no-deps`), comprueba que no toca los paquetes protegidos de OVOS y pide reiniciar `ovos-skills`.
+
+Si la skill no está instalada, Iaia dice el mensaje igualmente y la app avisa de que no puede escuchar.
+
+Limitaciones conocidas: la respuesta solo llega a la app si está abierta (no se guarda en el broker); y la transcripción es la del STT, con sus errores. Las respuestas son conversaciones privadas de una persona mayor: usa solo cuentas de la familia y el broker con TLS.
+
 ## Pendiente / siguientes pasos
 
 * Pairing real: el código no debe ser el identificador y el secreto a la vez. Producción: código de un solo uso canjeado en la nube por credenciales propias del móvil.

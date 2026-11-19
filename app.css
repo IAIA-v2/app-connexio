@@ -114,3 +114,5 @@ textarea{min-height:104px;resize:vertical}
 #toast{position:fixed;left:50%;bottom:calc(150px + var(--safe-b));transform:translate(-50%,20px);opacity:0;pointer-events:none;
   background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:14px;transition:.25s;max-width:88vw;text-align:center}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+.reply{margin-top:6px;padding:8px 11px;border-radius:12px 12px 12px 3px;background:var(--bg);border:1px solid var(--line);font-size:14px;max-width:100%}

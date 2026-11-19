@@ -123,6 +123,37 @@ fetch bridge/iaia-bridge.py "$BRIDGE_DST"; chmod 755 "$BRIDGE_DST"
 fetch bridge/iaia-bridge.service "$UNIT_DST"
 "$PY" -c "import ast,sys;ast.parse(open(sys.argv[1]).read())" "$BRIDGE_DST" && ok "Puente instalado en $BRIDGE_DST" || die "El puente descargado no es Python válido."
 
+# ---- 3b. skill de escucha (opcional): hace falta para «Llamar y esperar respuesta»
+SKILL_DIR="$HOME/iaia-skill-familia"; SKILL_CHANGED=""
+if yesno "¿Instalar también la skill de escucha (Iaia dice el mensaje, escucha y devuelve la respuesta)?" s; then
+  mkdir -p "$SKILL_DIR/ovos_skill_iaia_familia"
+  fetch skill/ovos-skill-iaia-familia/setup.py "$SKILL_DIR/setup.py"
+  fetch skill/ovos-skill-iaia-familia/ovos_skill_iaia_familia/__init__.py "$SKILL_DIR/ovos_skill_iaia_familia/__init__.py"
+  for f in "$SKILL_DIR/setup.py" "$SKILL_DIR/ovos_skill_iaia_familia/__init__.py"; do
+    "$PY" -c "import ast,sys;ast.parse(open(sys.argv[1]).read())" "$f" || die "$f no es Python válido."
+  done
+  ok "Ficheros de la skill en $SKILL_DIR"
+  if "$PY" -c "import importlib.metadata as m,sys;m.version('ovos-skill-iaia-familia')" 2>/dev/null; then
+    ok "La skill ya estaba instalada (modo editable): quedan actualizados sus ficheros"
+  else
+    command -v uv >/dev/null || die "Falta 'uv' para instalar la skill de forma segura."
+    warn "Simulo la instalación de la skill primero (--dry-run, sin dependencias)..."
+    DRY="$(mktemp)"; uv pip install --python "$PY" --dry-run --no-deps -e "$SKILL_DIR" >"$DRY" 2>&1 || { cat "$DRY"; die "El dry-run de la skill falló."; }
+    sed 's/^/    /' "$DRY"
+    if grep -qiE "($PROTECTED)" "$DRY"; then rm -f "$DRY"; die "El dry-run de la skill toca paquetes protegidos de OVOS. NO se instala nada."; fi
+    rm -f "$DRY"; ok "El dry-run solo añade la skill y no toca paquetes protegidos"
+    BEFORE="$(snapshot)"
+    uv pip install --python "$PY" --no-deps -e "$SKILL_DIR"
+    AFTER="$(snapshot)"
+    if [ "$BEFORE" != "$AFTER" ]; then printf '%s\n' "ANTES:" "$BEFORE" "DESPUÉS:" "$AFTER" >&2; die "Han cambiado versiones de paquetes protegidos."; fi
+    CHECK="$(uv pip check --python "$PY" 2>&1 || true)"
+    if printf '%s\n' "$CHECK" | grep -iE "workshop|bus-client|padacioso"; then warn "pip check muestra avisos sobre paquetes de OVOS (arriba)"
+    else ok "pip check sin avisos sobre workshop, bus-client ni padacioso"; fi
+  fi
+  SKILL_CHANGED=1
+  warn "Recuerda añadir $SKILL_DIR a DIRS en ~/iaia-sync.sh para que quede en el repositorio de copia."
+fi
+
 # ---------------------------------------------------------------- 4. configuración
 say "4/6 Configuración del broker MQTT"
 CODE=""
@@ -192,6 +223,13 @@ else
 fi
 
 # ---------------------------------------------------------------- 6. resumen
+if [ -n "$SKILL_CHANGED" ] && [ -z "${IAIA_NO_SERVICE:-}" ]; then
+  warn "OVOS carga las skills al arrancar: hay que reiniciar ovos-skills para activar la skill de escucha."
+  if yesno "¿Reiniciar ovos-skills ahora? (Iaia no responderá durante 40-60 s)" n; then
+    systemctl --user restart ovos-skills && ok "ovos-skills reiniciado; espera 40-60 s antes de probar" || warn "No pude reiniciarlo. Hazlo tú: systemctl --user restart ovos-skills"
+  else warn "Hazlo cuando quieras: systemctl --user restart ovos-skills"; fi
+fi
+
 say "6/6 Resumen"
 SSID=""
 if command -v nmcli >/dev/null 2>&1; then SSID="$(nmcli -t -f active,ssid dev wifi 2>/dev/null | awk -F: '$1=="yes"{print $2; exit}')"; fi

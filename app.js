@@ -79,6 +79,15 @@ class Demo {
     await sleep(120 + Math.random() * 300);
     return { ms: Math.round(performance.now() - t0), bus: true, ver: 'demo' };
   }
+  async ask(id, text, cb) {   // llamada simulada: dice, escucha y «responde» la persona
+    if (!this.isOn(id)) throw new Error('El dispositivo está inactivo.');
+    cb('sent'); await sleep(350);
+    cb('delivered'); await sleep(900 + text.length * 35);
+    cb('spoken'); demoSpeak(text); await sleep(600);
+    cb('listening'); await sleep(2200);
+    if (!this.isOn(id)) throw new Error('El dispositivo se desconectó mientras escuchaba.');
+    return { text: 'Sí, estic bé, gràcies. I tu?' };
+  }
   async send(id, text, cb) {
     if (!this.isOn(id)) throw new Error('El dispositivo está inactivo.');
     cb('sent'); await sleep(350);
@@ -126,6 +135,24 @@ class Mqtt {
   async pair(code) {
     if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
     return { id: code };   // v0.1: el código es el identificador. En producción: canjearlo en la nube por credenciales propias.
+  }
+  ask(id, text, cb) {   // llamada: Iaia dice el texto, escucha una respuesta y la devuelve
+    if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
+    if (!isOnline(id)) return Promise.reject(new Error('El dispositivo está inactivo.'));
+    const mid = uid();
+    return new Promise((res, rej) => {
+      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('La llamada no terminó a tiempo.')); }, 150000);
+      this.pending.set(mid, j => {
+        if (j.stage === 'received') return cb('delivered');
+        if (j.stage === 'said') return cb('spoken');
+        if (j.stage === 'listening') return cb('listening');
+        if (j.stage !== 'reply') return;
+        clearTimeout(to); this.pending.delete(mid);
+        if (j.ok) res({ text: String(j.text || '') }); else rej(new Error(j.error || 'Error en el dispositivo.'));
+      });
+      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ask', text, ts: Math.floor(Date.now() / 1000) }),
+        { qos: 1 }, err => { if (err) { clearTimeout(to); this.pending.delete(mid); rej(err); } else cb('sent'); });
+    });
   }
   ping(id) {   // ping/pong: la Iaia contesta al instante, sin hablar. No exige que figure como activa.
     if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
@@ -223,13 +250,13 @@ function vHome() {
 }
 
 function stateLabel(st) {
-  return { sending: ['Enviando…', 'wait'], sent: ['Enviado', 'wait'], delivered: ['Recibido', 'wait'], said: ['✓ Dicho', 'ok'], failed: ['✗ Falló', 'fail'] }[st] || ['', ''];
+  return { sending: ['Enviando…', 'wait'], sent: ['Enviado', 'wait'], delivered: ['Recibido', 'wait'], said: ['✓ Dicho', 'ok'], spoken: ['Dicho', 'wait'], listening: ['👂 Escuchando…', 'wait'], replied: ['💬 Respondió', 'ok'], noreply: ['Sin respuesta', 'fail'], failed: ['✗ Falló', 'fail'] }[st] || ['', ''];
 }
 function logHtml(id) {
   const l = (S.logs[id] || []).slice(0, 12);
   if (!l.length) return '<p class="hint">Todavía no has enviado mensajes.</p>';
   return `<ul class="log">${l.map(m => { const [lab, cls] = stateLabel(m.state);
-    return `<li><div><div>${esc(m.text)}</div><div class="t">${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div></div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
+    return `<li><div><div>${m.ask ? '📞 ' : ''}${esc(m.text)}</div><div class="t">${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div>${m.reply ? `<div class="reply">${esc(m.reply)}</div>` : ''}</div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
 }
 function pingHtml(id) {
   const l = (S.pings[id] || []).slice(0, 5);
@@ -255,7 +282,9 @@ function vDev(d) {
       <textarea id="msg" maxlength="300">Hello World</textarea>
       <div class="row"><span class="hint" style="margin:0">Lo dirá con la voz de Iaia, tal cual lo escribas. Mejor en catalán.</span><span class="count" id="cnt">11/300</span></div>
       <div class="chips">${PRESETS.map(p => `<button class="chip" data-act="preset" data-t="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-      <button class="btn block" id="send" data-act="send" ${o ? '' : 'disabled'}>🔊 Enviar y que lo diga</button>
+      <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Llamar y esperar respuesta</button>
+      <button class="btn block ghost" id="send" data-act="send" style="margin-top:8px" ${o ? '' : 'disabled'}>🔊 Solo que lo diga</button>
+      <p class="hint" style="margin-top:8px">«Llamar»: Iaia dice el mensaje, escucha una respuesta de la persona y te la envía.</p>
       <p class="hint" id="sendhint">${o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.'}</p></div>
     <h2>Mensajes recientes</h2><div class="panel" id="log">${logHtml(d.id)}</div>
     <h2>Dispositivo</h2><div class="panel">
@@ -333,7 +362,8 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
     const st = $('#dst'); if (st) st.innerHTML = statusHtml(d);
     const lg = $('#log'); if (lg) lg.innerHTML = logHtml(d.id);
     const pr = $('#pingres'); if (pr) pr.innerHTML = pingHtml(d.id);
-    const sb = $('#send'); if (sb && !sb.dataset.busy) sb.disabled = !o;
+    const busy = !!$('#call[data-busy],#send[data-busy]');
+    ['#send', '#call'].forEach(q => { const b = $(q); if (b && !busy) b.disabled = !o; });
     const hint = $('#sendhint'); if (hint) hint.textContent = o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.';
     return;
   }
@@ -342,16 +372,22 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
 
 /* ---------- acciones ---------- */
 function addLog(id, e) { (S.logs[id] = S.logs[id] || []).unshift(e); S.logs[id] = S.logs[id].slice(0, 30); saveLogs(); }
-async function doSend(id) {
+async function doSend(id, ask) {
   const ta = $('#msg'), text = ta.value.trim();
   if (!text) return toast('Escribe un mensaje primero.');
-  const e = { mid: uid(), text, t: Date.now(), state: 'sending' }; addLog(id, e); refresh();
-  const sb = $('#send'); sb.disabled = true; sb.dataset.busy = '1';
+  const e = { mid: uid(), text, t: Date.now(), state: 'sending', ask: !!ask }; addLog(id, e); refresh();
+  const btns = [$('#send'), $('#call')]; btns.forEach(b => { b.disabled = true; b.dataset.busy = '1'; });
   try {
-    await S.tr.send(id, text, st => { e.state = st; saveLogs(); refresh(); });
-    e.state = 'said'; toast('La Iaia ha hablado ✓');
+    if (ask) {
+      const r = await S.tr.ask(id, text, st => { e.state = st; saveLogs(); refresh(); });
+      if (r.text) { e.state = 'replied'; e.reply = r.text; toast('Ha respondido: ' + r.text.slice(0, 80)); }
+      else { e.state = 'noreply'; toast('La persona no ha respondido.'); }
+    } else {
+      await S.tr.send(id, text, st => { e.state = st; saveLogs(); refresh(); });
+      e.state = 'said'; toast('La Iaia ha hablado ✓');
+    }
   } catch (err) { e.state = 'failed'; e.err = err.message; toast(err.message); }
-  saveLogs(); delete sb.dataset.busy; refresh();
+  saveLogs(); btns.forEach(b => { delete b.dataset.busy; }); refresh();
 }
 async function doPing(id) {
   const btn = $('#ping'); if (btn.dataset.busy) return;
@@ -369,7 +405,8 @@ const actions = {
   hideinstall() { store.save('hideInstall', true); render(); },
   async install() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; render(); } },
   preset(el) { const ta = $('#msg'); ta.value = el.dataset.t; $('#cnt').textContent = ta.value.length + '/300'; },
-  send() { doSend(hash().slice(2)); },
+  send() { doSend(hash().slice(2), false); },
+  call() { doSend(hash().slice(2), true); },
   ping() { doPing(hash().slice(2)); },
   rename() {
     const id = hash().slice(2), v = $('#rn').value.trim(); if (!v) return toast('El nombre no puede estar vacío.');

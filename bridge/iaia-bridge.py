@@ -8,6 +8,8 @@ Qué hace
     (Last Will), así la app ve «Inactivo» en verde->gris.
   * Escucha  <prefix>/<device_id>/cmd  con {"id","type":"say","text"} y hace que
     Iaia lo diga en voz alta emitiendo un mensaje `speak` en el bus de OVOS.
+  * Llamada: {"type":"ask","text":...} -> Iaia dice el texto, escucha UNA respuesta y la devuelve
+    (ack stages: received, said, listening, reply{text}). Necesita la skill ovos-skill-iaia-familia.
   * Ping: {"type":"ping"} -> responde {"stage":"pong","ok":true,"bus":...,"ver":...} sin hablar.
   * Responde en  <prefix>/<device_id>/ack: primero {"stage":"received"} y, cuando
     termina de hablar, {"stage":"said","ok":true}.
@@ -22,6 +24,7 @@ Seguridad
 """
 import json
 import os
+import queue
 import re
 import signal
 import sys
@@ -36,6 +39,8 @@ CONF_PATH = os.path.expanduser(os.environ.get("IAIA_BRIDGE_CONF", "~/.config/iai
 HEARTBEAT_S = 30
 MAX_CHARS = 300
 SPEAK_TIMEOUT_S = 45
+ACCEPT_TIMEOUT_S = 4      # la skill iaia-familia debe responder en este tiempo
+REPLY_TIMEOUT_S = 60      # tiempo máximo esperando la respuesta de la persona
 
 with open(CONF_PATH) as f:
     CONF = json.load(f)
@@ -72,12 +77,75 @@ def bus_ok() -> bool:
     return bool(ev.is_set()) if ev is not None else True
 
 
+def _speak(text: str) -> None:
+    audio_done.clear()
+    bus.emit(Message("speak", {"utterance": prepare_for_tts(text), "lang": "ca-es", "expect_response": False}))
+    if not audio_done.wait(SPEAK_TIMEOUT_S):
+        raise TimeoutError("Iaia no confirmó el final de la locución")
+
+
 def say(text: str) -> None:
     with speak_lock:
-        audio_done.clear()
-        bus.emit(Message("speak", {"utterance": prepare_for_tts(text), "lang": "ca-es", "expect_response": False}))
-        if not audio_done.wait(SPEAK_TIMEOUT_S):
-            raise TimeoutError("Iaia no confirmó el final de la locución")
+        _speak(text)
+
+
+# ---- llamada: decir, escuchar y devolver la respuesta (necesita la skill ovos-skill-iaia-familia) ----
+asks = {}                      # id -> Queue de eventos de la skill
+
+
+def _on_familia(name):
+    def handler(m):
+        q = asks.get(m.data.get("id"))
+        if q is not None:
+            q.put((name, m.data))
+    return handler
+
+
+for _n in ("accepted", "spoken", "listening", "reply"):
+    bus.on(f"iaia.familia.{_n}", _on_familia(_n))
+
+
+def _wait_event(q, want, timeout):
+    end = time.time() + timeout
+    while True:
+        left = end - time.time()
+        if left <= 0:
+            raise queue.Empty
+        name, data = q.get(timeout=left)
+        if name == want or (name == "reply" and not data.get("ok", True)):
+            return name, data
+
+
+def ask(mid: str, text: str) -> None:
+    """Dice el mensaje, escucha una respuesta y la publica. Mantiene el bloqueo de voz durante toda la llamada."""
+    with speak_lock:
+        q = queue.Queue(); asks[mid] = q
+        try:
+            bus.emit(Message("iaia.familia.ask", {"id": mid, "text": prepare_for_tts(text)}))
+            try:
+                _wait_event(q, "accepted", ACCEPT_TIMEOUT_S)
+            except queue.Empty:
+                log("La skill iaia-familia no respondió: digo el mensaje sin escuchar")
+                _speak(text)
+                ack(mid, stage="said", ok=True)
+                return ack(mid, stage="reply", ok=False, error="Iaia ha dicho el mensaje, pero no puede escuchar: falta instalar la skill iaia-familia.")
+            name, d = _wait_event(q, "spoken", SPEAK_TIMEOUT_S)
+            if name == "reply":
+                return ack(mid, stage="reply", ok=False, error=d.get("error", "Error en la skill"))
+            ack(mid, stage="said", ok=True)
+            name, d = _wait_event(q, "listening", 5)
+            if name == "reply":
+                return ack(mid, stage="reply", ok=False, error=d.get("error", "Error en la skill"))
+            ack(mid, stage="listening", ok=True)
+            name, d = _wait_event(q, "reply", REPLY_TIMEOUT_S)
+            if d.get("ok", True):
+                ack(mid, stage="reply", ok=True, text=str(d.get("text", "")))
+            else:
+                ack(mid, stage="reply", ok=False, error=d.get("error", "Error en la skill"))
+        except queue.Empty:
+            ack(mid, stage="reply", ok=False, error="La Iaia no terminó la llamada a tiempo.")
+        finally:
+            asks.pop(mid, None)
 
 
 # ---- MQTT ----
@@ -126,6 +194,17 @@ def handle_cmd(payload: bytes):
             return ack(mid, stage="pong", ok=False, error="Ping caducado")
         log("Ping recibido")
         return ack(mid, stage="pong", ok=True, bus=bus_ok(), ver=VERSION, ts=int(time.time()))
+    if cmd.get("type") == "ask" and str(cmd.get("text", "")).strip():
+        if abs(time.time() - cmd.get("ts", time.time())) > 120:
+            return ack(mid, stage="reply", ok=False, error="Mensaje caducado")
+        ack(mid, stage="received")
+        try:
+            ask(mid, str(cmd["text"]))
+            log("Llamada terminada:", str(cmd["text"])[:60])
+        except Exception as e:
+            log("Error en la llamada:", e)
+            ack(mid, stage="reply", ok=False, error=str(e))
+        return
     if cmd.get("type") != "say" or not str(cmd.get("text", "")).strip():
         return ack(mid, ok=False, error="Comando no válido")
     if abs(time.time() - cmd.get("ts", time.time())) > 120:      # evita repeticiones de mensajes viejos
