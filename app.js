@@ -38,6 +38,7 @@ const S = {
   logs: store.load('logs', {}),                       // {id: [{mid,text,t,state,err}]}
   settings: Object.assign({ mode: 'demo', url: '', user: '', pass: '', prefix: 'iaia', sound: true }, store.load('settings', {})),
   status: {},                                         // {id: {online, ts}}
+  pings: {},                                          // {id: [{t, ms, ok, bus, ver, err}]} (solo en memoria)
   conn: { kind: 'demo', msg: '' },
   add: { step: 1, method: null, code: '', name: 'Iaia', busy: false, err: '', found: '' },
   tr: null
@@ -71,6 +72,12 @@ class Demo {
     await sleep(700);
     if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
     return { id: code };
+  }
+  async ping(id) {
+    const t0 = performance.now();
+    if (!this.isOn(id)) { await sleep(3000); throw new Error('Sin respuesta (el dispositivo simulado está apagado).'); }
+    await sleep(120 + Math.random() * 300);
+    return { ms: Math.round(performance.now() - t0), bus: true, ver: 'demo' };
   }
   async send(id, text, cb) {
     if (!this.isOn(id)) throw new Error('El dispositivo está inactivo.');
@@ -119,6 +126,21 @@ class Mqtt {
   async pair(code) {
     if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
     return { id: code };   // v0.1: el código es el identificador. En producción: canjearlo en la nube por credenciales propias.
+  }
+  ping(id) {   // ping/pong: la Iaia contesta al instante, sin hablar. No exige que figure como activa.
+    if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
+    const mid = uid(), t0 = performance.now();
+    return new Promise((res, rej) => {
+      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('Sin respuesta en 8 segundos.')); }, 8000);
+      this.pending.set(mid, j => {
+        if (j.stage !== 'pong') return;
+        clearTimeout(to); this.pending.delete(mid);
+        if (j.ok === false) rej(new Error(j.error || 'Error en el dispositivo.'));
+        else res({ ms: Math.round(performance.now() - t0), bus: j.bus !== false, ver: j.ver || '' });
+      });
+      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ping', ts: Math.floor(Date.now() / 1000) }),
+        { qos: 1 }, err => { if (err) { clearTimeout(to); this.pending.delete(mid); rej(err); } });
+    });
   }
   send(id, text, cb) {
     if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
@@ -209,6 +231,15 @@ function logHtml(id) {
   return `<ul class="log">${l.map(m => { const [lab, cls] = stateLabel(m.state);
     return `<li><div><div>${esc(m.text)}</div><div class="t">${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div></div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
 }
+function pingHtml(id) {
+  const l = (S.pings[id] || []).slice(0, 5);
+  if (!l.length) return '';
+  return `<ul class="log" style="margin-top:10px">${l.map(r => r.wait
+    ? `<li><div><div>Esperando el pong…</div><div class="t">${hhmm(r.t)}</div></div><span class="st wait">…</span></li>`
+    : r.ok
+      ? `<li><div><div>Pong en ${r.ms} ms</div><div class="t">${hhmm(r.t)}${r.ver ? ' · versión ' + esc(r.ver) : ''}${r.bus ? '' : ' · OVOS no responde'}</div></div><span class="st ${r.bus ? 'ok' : 'fail'}">${r.bus ? '✓ Pong' : '! Sin OVOS'}</span></li>`
+      : `<li><div><div>Sin pong</div><div class="t">${hhmm(r.t)} · ${esc(r.err)}</div></div><span class="st fail">✗ Falló</span></li>`).join('')}</ul>`;
+}
 function statusHtml(d) {
   const o = isOnline(d.id), st = S.status[d.id];
   return `<span class="pill ${o ? 'on' : 'off'}"><i class="dot"></i>${o ? 'Activo' : 'Inactivo'}</span><div class="small sub" style="text-align:right;margin-top:6px">${o ? 'Señal ' + ago(st.ts) : 'Visto ' + ago(st && st.ts)}</div>`;
@@ -217,6 +248,9 @@ function vDev(d) {
   const o = isOnline(d.id);
   return `<a class="back" href="#inicio">‹ Mis dispositivos</a>
     <div class="panel hero"><div><div class="name" id="dname">${esc(d.name)}</div><div class="sub">${esc(d.id)}</div></div><div id="dst">${statusHtml(d)}</div></div>
+    <div class="panel"><div class="row"><div><div style="font-weight:600">Comprobar conexión</div><div class="hint" style="margin:2px 0 0">Envía un ping y espera el pong de la Iaia. No habla.</div></div>
+      <button class="btn small ghost" id="ping" data-act="ping">📡 Ping</button></div>
+      <div id="pingres">${pingHtml(d.id)}</div></div>
     <div class="panel"><label for="msg" style="margin-top:0">Mensaje para que lo diga en voz alta</label>
       <textarea id="msg" maxlength="300">Hello World</textarea>
       <div class="row"><span class="hint" style="margin:0">Lo dirá con la voz de Iaia, tal cual lo escribas. Mejor en catalán.</span><span class="count" id="cnt">11/300</span></div>
@@ -298,6 +332,7 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
     const d = dev(h.slice(2)), o = isOnline(d.id);
     const st = $('#dst'); if (st) st.innerHTML = statusHtml(d);
     const lg = $('#log'); if (lg) lg.innerHTML = logHtml(d.id);
+    const pr = $('#pingres'); if (pr) pr.innerHTML = pingHtml(d.id);
     const sb = $('#send'); if (sb && !sb.dataset.busy) sb.disabled = !o;
     const hint = $('#sendhint'); if (hint) hint.textContent = o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.';
     return;
@@ -318,6 +353,14 @@ async function doSend(id) {
   } catch (err) { e.state = 'failed'; e.err = err.message; toast(err.message); }
   saveLogs(); delete sb.dataset.busy; refresh();
 }
+async function doPing(id) {
+  const btn = $('#ping'); if (btn.dataset.busy) return;
+  const r = { t: Date.now(), wait: true }; (S.pings[id] = S.pings[id] || []).unshift(r);
+  btn.dataset.busy = '1'; btn.disabled = true; refresh();
+  try { Object.assign(r, await S.tr.ping(id), { ok: true }); }
+  catch (err) { Object.assign(r, { ok: false, err: err.message }); }
+  r.wait = false; delete btn.dataset.busy; btn.disabled = false; refresh();
+}
 function finishPair(id) {
   S.add.code = id; S.add.step = 3; S.add.busy = false; S.add.err = '';
   render();
@@ -327,6 +370,7 @@ const actions = {
   async install() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; render(); } },
   preset(el) { const ta = $('#msg'); ta.value = el.dataset.t; $('#cnt').textContent = ta.value.length + '/300'; },
   send() { doSend(hash().slice(2)); },
+  ping() { doPing(hash().slice(2)); },
   rename() {
     const id = hash().slice(2), v = $('#rn').value.trim(); if (!v) return toast('El nombre no puede estar vacío.');
     dev(id).name = v; saveDevices(); $('#dname').textContent = v; toast('Nombre guardado');

@@ -103,6 +103,10 @@ El script pregunta el dominio, el prefijo y los puertos, instala Mosquitto y cer
 
 Otras opciones: `--add-device`, `--add-app-user`, `--grant USUARIO CODIGO`, `--remove-device CODIGO` y `--list`. El fichero de permisos (`/etc/mosquitto/acl`) se regenera desde `/etc/mosquitto/iaia/`; no se edita a mano.
 
+## Ping / pong (comprobar la conexión)
+
+En la ficha de cada dispositivo, el botón **Ping** envía `{"id","type":"ping","ts"}` a `iaia/<id>/cmd` y espera en `iaia/<id>/ack` la respuesta `{"id","stage":"pong","ok":true,"bus":true,"ver":"0.1"}`. Mide el tiempo de ida y vuelta, no hace hablar a Iaia y da error si no hay pong en 8 segundos. `bus:false` indica que el puente está vivo pero no llega a OVOS. Hay que actualizar también el puente en la Raspberry (`install.sh` lo vuelve a descargar).
+
 ## Pendiente / siguientes pasos
 
 * Pairing real: el código no debe ser el identificador y el secreto a la vez. Producción: código de un solo uso canjeado en la nube por credenciales propias del móvil.

@@ -8,6 +8,7 @@ Qué hace
     (Last Will), así la app ve «Inactivo» en verde->gris.
   * Escucha  <prefix>/<device_id>/cmd  con {"id","type":"say","text"} y hace que
     Iaia lo diga en voz alta emitiendo un mensaje `speak` en el bus de OVOS.
+  * Ping: {"type":"ping"} -> responde {"stage":"pong","ok":true,"bus":...,"ver":...} sin hablar.
   * Responde en  <prefix>/<device_id>/ack: primero {"stage":"received"} y, cuando
     termina de hablar, {"stage":"said","ok":true}.
 
@@ -120,6 +121,11 @@ def handle_cmd(payload: bytes):
         mid = cmd["id"]
     except Exception:
         return log("Comando ilegible, ignorado")
+    if cmd.get("type") == "ping":                                  # ping/pong: responde al instante y no habla
+        if abs(time.time() - cmd.get("ts", time.time())) > 120:
+            return ack(mid, stage="pong", ok=False, error="Ping caducado")
+        log("Ping recibido")
+        return ack(mid, stage="pong", ok=True, bus=bus_ok(), ver=VERSION, ts=int(time.time()))
     if cmd.get("type") != "say" or not str(cmd.get("text", "")).strip():
         return ack(mid, ok=False, error="Comando no válido")
     if abs(time.time() - cmd.get("ts", time.time())) > 120:      # evita repeticiones de mensajes viejos
