@@ -126,6 +126,10 @@ Si la skill no está instalada, Iaia dice el mensaje igualmente y la app avisa d
 
 Limitaciones conocidas: la respuesta solo llega a la app si está abierta (no se guarda en el broker); y la transcripción es la del STT, con sus errores. Las respuestas son conversaciones privadas de una persona mayor: usa solo cuentas de la familia y el broker con TLS.
 
+## Recarga automática
+
+La app se recarga sola cada 5 minutos para coger la versión nueva y reconectar con el broker. Solo lo hace si nadie la está usando: no recarga durante una llamada, con un mensaje a medio escribir, ni en Ajustes o al añadir un dispositivo (en ese caso lo reintenta cada 30 s). Constante `AUTO_RELOAD_MS` en `app.js`.
+
 ## Pendiente / siguientes pasos
 
 * Pairing real: el código no debe ser el identificador y el secreto a la vez. Producción: código de un solo uso canjeado en la nube por credenciales propias del móvil.

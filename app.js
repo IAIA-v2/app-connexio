@@ -470,6 +470,22 @@ window.addEventListener('hashchange', () => render());
 useTransport();
 render();
 setInterval(() => { if (hash() !== 'nuevo' && hash() !== 'ajustes') refresh(); }, 10000);
+/* Recarga automática cada 5 minutos: coge la versión nueva de la app (el service worker es "red primero")
+   y reconecta con el broker. Solo recarga si nadie está usando la app: no se interrumpe una llamada,
+   un mensaje a medio escribir ni los ajustes. Si no es el momento, lo reintenta cada 30 s. */
+const AUTO_RELOAD_MS = 5 * 60 * 1000;
+const loadedAt = Date.now();
+function idleForReload() {
+  if (hash() === 'nuevo' || hash() === 'ajustes') return false;
+  if ($('#call[data-busy],#send[data-busy],#ping[data-busy]')) return false;
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
+  const m = $('#msg'); if (m && m.value !== m.defaultValue) return false;
+  return true;
+}
+setInterval(() => {
+  if (Date.now() - loadedAt >= AUTO_RELOAD_MS && idleForReload()) location.reload();
+}, 30000);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => { /* en entornos sin SW (vista previa) la app funciona igual */ });
 }
