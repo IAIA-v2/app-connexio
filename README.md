@@ -34,6 +34,8 @@ bridge/iaia-bridge.service         Unidad systemd --user
 | `iaia/<id>/cmd` | app → Pi | `{"id":"a1b2","type":"say","text":"Hello World","ts":1731930000}` |
 | `iaia/<id>/ack` | Pi → app | `{"id":"a1b2","stage":"received"}` y `{"id":"a1b2","stage":"said","ok":true}` |
 
+Descripción completa de campos, errores y tiempos (también `ping` y `ask`): [docs/protocolo-mqtt.md](docs/protocolo-mqtt.md).
+
 ## Bluetooth: qué se puede y qué no
 
 | Plataforma | Web Bluetooth en una PWA | Vía de emparejado |
