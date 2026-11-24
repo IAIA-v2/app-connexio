@@ -24,13 +24,16 @@ Mensajes del bus (todos con data {"id": ...}):
   iaia.familia.reply     (skill -> puente)   data: ok, text ("" si no hubo respuesta), error
 """
 import collections
+import threading
 import time
+import uuid
 
 from ovos_bus_client.message import Message
 from ovos_workshop.decorators import intent_handler
 from ovos_workshop.skills import OVOSSkill
 
 PENDING_TTL_S = 60
+APP_SENT_WAIT_S = 15      # el puente tarda hasta ~5 s esperando a la app, más la publicación
 
 
 class IaiaFamiliaSkill(OVOSSkill):
@@ -38,6 +41,9 @@ class IaiaFamiliaSkill(OVOSSkill):
         self._pending = collections.OrderedDict()      # id -> (texto, hora)
         self.add_event("iaia.familia.ask", self.handle_ask)
         self.add_event("iaia.familia.cancel", self.handle_cancel)
+        self._sending = threading.Lock()
+        self._sent_waiters = {}                         # id del mensaje -> [Event, datos]
+        self.add_event("iaia.app.sent", self.handle_app_sent)
 
     def _emit(self, name, **data):
         self.bus.emit(Message(name, data))
@@ -78,3 +84,49 @@ class IaiaFamiliaSkill(OVOSSkill):
         except Exception as e:
             self.log.exception("Error en la llamada de la familia")
             self._emit("iaia.familia.reply", id=mid, ok=False, error=str(e))
+
+    # ---- Mensajes voluntarios de la persona mayor hacia la app (issue #7) ----
+    def handle_app_sent(self, message):
+        w = self._sent_waiters.get(message.data.get("id", ""))
+        if w:
+            w[1] = dict(message.data)
+            w[0].set()
+
+    @intent_handler("missatge.intent")
+    def handle_missatge(self, message):
+        if not self._sending.acquire(blocking=False):   # ya hay un envío en curso: no duplicar
+            return
+        try:
+            self.speak("Quin missatge vols enviar?", wait=True)
+            # Diálogo vacío = solo abre el micro; num_retries=0: un único intento, sin exigir «yaya».
+            text = (self.get_response(num_retries=0, message=message) or "").strip()
+            if not text or not any(ch.isalnum() for ch in text):
+                self.log.info("Missatge voluntari: no s'ha detectat veu, no s'envia res")
+                self.speak("No he sentit cap missatge, així que no he enviat res.", wait=True)
+                return
+            mid = "v" + uuid.uuid4().hex[:10]
+            w = [threading.Event(), {}]
+            self._sent_waiters[mid] = w
+            self.bus.emit(Message("iaia.app.send", {"id": mid, "text": text, "source": "iaia_voluntary"}))
+            got = w[0].wait(APP_SENT_WAIT_S)
+            res = w[1] if got else {}
+            self.log.info("Missatge voluntari %s: %s", mid, res.get("stage", "sense resposta del pont"))
+            if res.get("ok") and res.get("stage") == "delivered":
+                self.speak("Missatge enviat.", wait=True)
+            elif res.get("ok"):
+                # Publicado en el broker, pero la app aún no ha confirmado la recepción.
+                self.speak("He enviat el missatge, però encara no tinc confirmació que l'hagin rebut.", wait=True)
+            elif res.get("error") == "duplicat":
+                self.speak("Aquest missatge ja l'he enviat fa un moment.", wait=True)
+            else:
+                self.speak("No he pogut enviar el missatge.", wait=True)
+        except Exception:
+            self.log.exception("Error enviant el missatge voluntari")
+            try:
+                self.speak("No he pogut enviar el missatge.", wait=True)
+            except Exception:
+                pass
+        finally:
+            self._sent_waiters.pop(mid if "mid" in locals() else "", None)
+            self._sending.release()
+

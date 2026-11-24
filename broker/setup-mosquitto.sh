@@ -74,7 +74,7 @@ regen_acl() {
     if [ -s "$DEVICES" ]; then while read -r c; do [ -n "$c" ] || continue
       printf '\nuser pi-%s\ntopic readwrite %s/%s/#\n' "$c" "$PREFIX" "$c"; done <"$DEVICES"; fi
     if [ -s "$ACCESS" ]; then while read -r u c; do [ -n "$u" ] && [ -n "$c" ] || continue
-      printf '\nuser %s\ntopic read %s/%s/status\ntopic read %s/%s/ack\ntopic write %s/%s/cmd\n' "$u" "$PREFIX" "$c" "$PREFIX" "$c" "$PREFIX" "$c"; done <"$ACCESS"; fi
+      printf '\nuser %s\ntopic read %s/%s/status\ntopic read %s/%s/ack\ntopic read %s/%s/messages\ntopic read %s/%s/history\ntopic write %s/%s/cmd\n' "$u" "$PREFIX" "$c" "$PREFIX" "$c" "$PREFIX" "$c" "$PREFIX" "$c" "$PREFIX" "$c"; done <"$ACCESS"; fi
   } >"$t"
   backup "$ACL"
   install -m 600 "$t" "$ACL"; rm -f "$t"

@@ -35,8 +35,9 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 /* ---------- estado ---------- */
 const S = {
   devices: store.load('devices', []),                 // [{id, name}]
+  hist: store.load('hist', {}),                       // {id: [ítems]} historial común de la Iaia (lo publica la Pi, retenido en iaia/<id>/history)
   logs: store.load('logs', {}),                       // {id: [{mid,text,t,state,err}]}
-  settings: Object.assign({ mode: 'demo', url: '', user: '', pass: '', prefix: 'iaia', sound: true }, store.load('settings', {})),
+  settings: Object.assign({ mode: 'demo', url: '', user: '', pass: '', prefix: 'iaia', sound: true, name: '' }, store.load('settings', {})),
   status: {},                                         // {id: {online, ts}}
   pings: {},                                          // {id: [{t, ms, ok, bus, ver, err}]} (solo en memoria)
   conn: { kind: 'demo', msg: '' },
@@ -124,22 +125,35 @@ class Mqtt {
     this.c.on('message', (topic, payload) => this.onMsg(topic, payload));
   }
   stop() { if (this.c) { try { this.c.end(true); } catch { } this.c = null; } this.connected = false; }
-  watch(id) { if (this.c && this.connected) this.c.subscribe([`${this.p}/${id}/status`, `${this.p}/${id}/ack`], { qos: 1 }); }
-  unwatch(id) { if (this.c) this.c.unsubscribe([`${this.p}/${id}/status`, `${this.p}/${id}/ack`]); }
+  watch(id) { if (this.c && this.connected) this.c.subscribe([`${this.p}/${id}/status`, `${this.p}/${id}/ack`, `${this.p}/${id}/messages`, `${this.p}/${id}/history`], { qos: 1 }); }
+  unwatch(id) { if (this.c) this.c.unsubscribe([`${this.p}/${id}/status`, `${this.p}/${id}/ack`, `${this.p}/${id}/messages`, `${this.p}/${id}/history`]); }
   onMsg(topic, payload) {
     let j; try { j = JSON.parse(payload.toString()); } catch { return; }
     const [, id, kind] = topic.split('/');
     if (kind === 'status') setStatus(id, { online: !!j.online, ts: j.ts ? j.ts * 1000 : Date.now() });
     if (kind === 'ack' && this.pending.has(j.id)) this.pending.get(j.id)(j);
+    if (kind === 'history' && Array.isArray(j.items)) {        // historial común (retenido): lo ven todos los familiares con esta Iaia
+      S.hist[id] = j.items.filter(i => i && i.id && typeof i.text === 'string');
+      store.save('hist', S.hist); refresh();
+    }
+    if (kind === 'messages' && j.id && typeof j.text === 'string' && j.text.trim()) {   // mensaje que la persona mayor envía por iniciativa propia
+      // confirmación de recepción: la Iaia solo da el mensaje por entregado cuando la app lo confirma (se envía siempre, también si es un duplicado)
+      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: j.id, type: 'msg_ack', ts: Math.floor(Date.now() / 1000) }), { qos: 1 });
+      const logs = S.logs[id] || [];
+      if (logs.some(e => e.mid === j.id)) return;                                        // ya mostrado (reentrega QoS 1)
+      addLog(id, { mid: j.id, text: j.text, t: j.ts ? j.ts * 1000 : Date.now(), state: 'incoming', source: j.source || '' });
+      toast('Missatge de la Iaia: ' + j.text.slice(0, 80));
+      refresh();
+    }
   }
   async pair(code) {
     if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
     return { id: code };   // v0.1: el código es el identificador. En producción: canjearlo en la nube por credenciales propias.
   }
-  ask(id, text, cb) {   // llamada: Iaia dice el texto, escucha una respuesta y la devuelve
+  ask(id, text, cb, mid0) {   // llamada: Iaia dice el texto, escucha una respuesta y la devuelve
     if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
     if (!isOnline(id)) return Promise.reject(new Error('El dispositivo está inactivo.'));
-    const mid = uid();
+    const mid = mid0 || uid();
     return new Promise((res, rej) => {
       const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('La llamada no terminó a tiempo.')); }, 150000);
       this.pending.set(mid, j => {
@@ -150,7 +164,7 @@ class Mqtt {
         clearTimeout(to); this.pending.delete(mid);
         if (j.ok) res({ text: String(j.text || '') }); else rej(new Error(j.error || 'Error en el dispositivo.'));
       });
-      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ask', text, ts: Math.floor(Date.now() / 1000) }),
+      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ask', text, from: S.settings.name || undefined, ts: Math.floor(Date.now() / 1000) }),
         { qos: 1 }, err => { if (err) { clearTimeout(to); this.pending.delete(mid); rej(err); } else cb('sent'); });
     });
   }
@@ -169,10 +183,10 @@ class Mqtt {
         { qos: 1 }, err => { if (err) { clearTimeout(to); this.pending.delete(mid); rej(err); } });
     });
   }
-  send(id, text, cb) {
+  send(id, text, cb, mid0) {
     if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
     if (!isOnline(id)) return Promise.reject(new Error('El dispositivo está inactivo.'));
-    const mid = uid();
+    const mid = mid0 || uid();
     return new Promise((res, rej) => {
       const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('El dispositivo no confirmó a tiempo.')); }, 45000);
       this.pending.set(mid, j => {
@@ -180,7 +194,7 @@ class Mqtt {
         clearTimeout(to); this.pending.delete(mid);
         if (j.ok) { cb('said'); res(); } else rej(new Error(j.error || 'Error en el dispositivo.'));
       });
-      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'say', text, ts: Math.floor(Date.now() / 1000) }),
+      this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'say', text, from: S.settings.name || undefined, ts: Math.floor(Date.now() / 1000) }),
         { qos: 1 }, err => { if (err) { clearTimeout(to); rej(err); } else cb('sent'); });
     });
   }
@@ -250,13 +264,31 @@ function vHome() {
 }
 
 function stateLabel(st) {
-  return { sending: ['Enviando…', 'wait'], sent: ['Enviado', 'wait'], delivered: ['Recibido', 'wait'], said: ['✓ Dicho', 'ok'], spoken: ['Dicho', 'wait'], listening: ['👂 Escuchando…', 'wait'], replied: ['💬 Respondió', 'ok'], noreply: ['Sin respuesta', 'fail'], failed: ['✗ Falló', 'fail'] }[st] || ['', ''];
+  return { sending: ['Enviando…', 'wait'], sent: ['Enviado', 'wait'], delivered: ['Recibido', 'wait'], said: ['✓ Dicho', 'ok'], spoken: ['Dicho', 'wait'], listening: ['👂 Escuchando…', 'wait'], replied: ['💬 Respondió', 'ok'], incoming: ['💌 De la Iaia', 'ok'], noreply: ['Sin respuesta', 'fail'], failed: ['✗ Falló', 'fail'] }[st] || ['', ''];
+}
+const HIST_TTL_MS = 7 * 86400000, HIST_MAX = 30;   // últimos 30 mensajes, caducidad de 7 días
+function histState(h) {
+  if (h.kind === 'voluntary') return 'incoming';
+  if (h.kind === 'call') return { replied: 'replied', noreply: 'noreply', failed: 'failed' }[h.state] || 'delivered';
+  return { said: 'said', failed: 'failed' }[h.state] || 'delivered';
+}
+// Historial del grupo familiar de esta Iaia: el que publica la Pi + lo que este móvil tiene en curso (se unen por id)
+function timeline(id) {
+  const now = Date.now(), by = new Map(), FINAL = ['replied', 'noreply', 'failed', 'said', 'incoming'];
+  (S.hist[id] || []).forEach(h => by.set(h.id, { mid: h.id, text: h.text, t: (h.t || 0) * 1000, state: histState(h), ask: h.kind === 'call', reply: h.reply, err: h.err, source: h.source || '', from: h.from || '' }));
+  (S.logs[id] || []).forEach(l => { const o = by.get(l.mid); if (!o) by.set(l.mid, l); else if (!FINAL.includes(l.state)) o.state = l.state; });
+  return [...by.values()].filter(e => now - e.t < HIST_TTL_MS).sort((a, b) => b.t - a.t).slice(0, HIST_MAX);
+}
+function whoHtml(m) {
+  if (m.source === 'iaia_voluntary') return '';
+  const n = (m.from || '').trim();
+  return n ? '👤 ' + esc(n === (S.settings.name || '').trim() ? 'Tu' : n) + ' · ' : '';
 }
 function logHtml(id) {
-  const l = (S.logs[id] || []).slice(0, 12);
-  if (!l.length) return '<p class="hint">Todavía no has enviado mensajes.</p>';
+  const l = timeline(id);
+  if (!l.length) return '<p class="hint">Encara no hi ha missatges de la família amb aquesta Iaia.</p>';
   return `<ul class="log">${l.map(m => { const [lab, cls] = stateLabel(m.state);
-    return `<li><div><div>${m.ask ? '📞 ' : ''}${esc(m.text)}</div><div class="t">${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div>${m.reply ? `<div class="reply">${esc(m.reply)}</div>` : ''}</div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
+    return `<li><div>${m.source === 'iaia_voluntary' ? '<div class="t">Missatge enviat voluntàriament des d\'IAIA</div>' : ''}<div>${m.ask ? '📞 ' : ''}${esc(m.text)}</div><div class="t">${whoHtml(m)}${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div>${m.reply ? `<div class="reply">${esc(m.reply)}</div>` : ''}</div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
 }
 function pingHtml(id) {
   const l = (S.pings[id] || []).slice(0, 5);
@@ -285,8 +317,9 @@ function vDev(d) {
       <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Llamar y esperar respuesta</button>
       <button class="btn block ghost" id="send" data-act="send" style="margin-top:8px" ${o ? '' : 'disabled'}>🔊 Solo que lo diga</button>
       <p class="hint" style="margin-top:8px">«Llamar»: Iaia dice el mensaje, escucha una respuesta de la persona y te la envía.</p>
+      <p class="hint">${S.settings.name ? 'Enviaràs com a <b>' + esc(S.settings.name) + '</b>.' : 'Posa el teu nom a <a href="#ajustes">Ajustes</a> perquè la teva família sàpiga qui escriu.'}</p>
       <p class="hint" id="sendhint">${o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.'}</p></div>
-    <h2>Mensajes recientes</h2><div class="panel" id="log">${logHtml(d.id)}</div>
+    <h2>Grup familiar - missatges recents</h2><p class="hint" style="margin:0 0 6px">Tots els familiars amb aquesta Iaia veuen els mateixos missatges (últims 30, 7 dies).</p><div class="panel" id="log">${logHtml(d.id)}</div>
     <h2>Dispositivo</h2><div class="panel">
       <label for="rn" style="margin-top:0">Nombre</label>
       <div class="row"><input type="text" id="rn" value="${esc(d.name)}" maxlength="30"><button class="btn small ghost" data-act="rename">Guardar</button></div>
@@ -337,7 +370,10 @@ function vSet() {
       <div style="margin-top:12px"><button class="btn small" data-act="saveconn">Guardar y conectar</button></div></div>`;
   return `<header class="top"><div><h1>Ajustes</h1><p class="sub">Versión 0.1 (prototipo)</p></div>${connBadge()}</header>
     <div class="seg"><button data-act="mode" data-m="demo" class="${demo ? 'act' : ''}">Demo</button><button data-act="mode" data-m="mqtt" class="${demo ? '' : 'act'}">Conexión real</button></div>
-    <div style="height:14px"></div>${real}${sim}
+    <div style="height:14px"></div>
+    <h2>El teu nom</h2><div class="panel"><label for="myname" style="margin-top:0">Així et veurà la teva família als missatges</label>
+      <div class="row"><input type="text" id="myname" value="${esc(s.name || '')}" maxlength="30" placeholder="Per exemple: Maria" autocomplete="off"><button class="btn small" data-act="savename">Desa</button></div></div>
+    ${real}${sim}
     <h2>Datos</h2><div class="panel"><button class="btn small danger" data-act="reset">Borrar todo en este móvil</button></div>`;
 }
 
@@ -375,15 +411,15 @@ function addLog(id, e) { (S.logs[id] = S.logs[id] || []).unshift(e); S.logs[id] 
 async function doSend(id, ask) {
   const ta = $('#msg'), text = ta.value.trim();
   if (!text) return toast('Escribe un mensaje primero.');
-  const e = { mid: uid(), text, t: Date.now(), state: 'sending', ask: !!ask }; addLog(id, e); refresh();
+  const e = { mid: uid(), text, t: Date.now(), state: 'sending', ask: !!ask, from: S.settings.name || '' }; addLog(id, e); refresh();
   const btns = [$('#send'), $('#call')]; btns.forEach(b => { b.disabled = true; b.dataset.busy = '1'; });
   try {
     if (ask) {
-      const r = await S.tr.ask(id, text, st => { e.state = st; saveLogs(); refresh(); });
+      const r = await S.tr.ask(id, text, st => { e.state = st; saveLogs(); refresh(); }, e.mid);
       if (r.text) { e.state = 'replied'; e.reply = r.text; toast('Ha respondido: ' + r.text.slice(0, 80)); }
       else { e.state = 'noreply'; toast('La persona no ha respondido.'); }
     } else {
-      await S.tr.send(id, text, st => { e.state = st; saveLogs(); refresh(); });
+      await S.tr.send(id, text, st => { e.state = st; saveLogs(); refresh(); }, e.mid);
       e.state = 'said'; toast('La Iaia ha hablado ✓');
     }
   } catch (err) { e.state = 'failed'; e.err = err.message; toast(err.message); }
@@ -415,7 +451,7 @@ const actions = {
   del(el) {
     if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Pulsa otra vez para confirmar'; return; }
     const id = hash().slice(2); S.tr.unwatch(id);
-    S.devices = S.devices.filter(d => d.id !== id); delete S.logs[id]; saveDevices(); saveLogs();
+    S.devices = S.devices.filter(d => d.id !== id); delete S.logs[id]; delete S.hist[id]; store.save('hist', S.hist); saveDevices(); saveLogs();
     location.hash = 'inicio'; toast('Dispositivo eliminado');
   },
   method(el) { S.add = Object.assign(S.add, { method: el.dataset.m, step: 2, err: '', code: '', busy: false }); render(); },
@@ -446,6 +482,7 @@ const actions = {
     store.save('settings', S.settings); useTransport(); toast('Conectando…');
   },
   power(el) { S.tr.setPower(el.dataset.id, el.checked); toast(el.checked ? 'Iaia encendida' : 'Iaia apagada'); },
+  savename() { S.settings.name = ($('#myname').value || '').replace(/\s+/g, ' ').trim().slice(0, 30); store.save('settings', S.settings); toast(S.settings.name ? 'Nom desat: ' + S.settings.name : 'Nom esborrat'); },
   sound(el) { S.settings.sound = el.checked; store.save('settings', S.settings); },
   reset(el) {
     if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Pulsa otra vez para confirmar'; return; }
