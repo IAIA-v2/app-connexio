@@ -21,8 +21,10 @@ Tópicos:
 | `iaia/<id>/status` | Pi → app | Estado y latido |
 | `iaia/<id>/cmd` | app → Pi | Órdenes |
 | `iaia/<id>/ack` | Pi → app | Confirmaciones y respuestas |
+| `iaia/<id>/messages` | Pi → app | Mensajes que la persona mayor envía por iniciativa propia (sin llamada previa) |
+| `iaia/<id>/history` | Pi → app | **Retenido.** Historial común de la IAIA, el mismo para todos los familiares vinculados |
 
-La app se suscribe a `status` y `ack`. El puente se suscribe a `cmd`.
+La app se suscribe a `status`, `ack`, `messages` y `history`. El puente se suscribe a `cmd`.
 
 ## 2. `iaia/<id>/status` (retenido)
 
@@ -47,6 +49,8 @@ La app marca el dispositivo como **Inactivo** si `online` es `false` o si pasan 
 ## 3. `iaia/<id>/cmd`
 
 Campos comunes:
+
+(`from` es opcional en `say` y `ask`: nombre del familiar que lo envía, máx. 40 caracteres. Se guarda en el historial común.)
 
 | Campo | Obligatorio | Descripción |
 |---|---|---|
@@ -116,6 +120,56 @@ Errores de `ask` que conviene conocer:
 | `Mensaje caducado` | `ts` fuera de ±120 s. No se envía `received`. |
 | `Iaia ha dicho el mensaje, pero no pudo ponerse a escuchar (la orden interna no llegó a la skill).` | La skill aceptó el texto pero no recibió la intención disparadora en 8 s. Antes se envía `said` con `ok: true`. |
 | Error de la skill (p. ej. `Mensaje vacío`) | La skill lo devuelve |
+
+### 4.2 bis. `iaia/<id>/messages`: mensaje voluntario de la persona mayor
+
+Publicado por el puente (QoS 1, no retenido) cuando la persona dice «Yaya, vull enviar un missatge» y dicta el texto. El texto es exactamente el que devuelve el STT, sin LLM.
+
+```json
+{"id": "v1a2b3c4d5", "type": "message", "source": "iaia_voluntary", "text": "Hola, avui he anat a passejar i estic molt bé", "ts": 1731930000}
+```
+
+| Campo | Descripción |
+|---|---|
+| `id` | Identificador del mensaje (único). La app lo devuelve en `msg_ack`. |
+| `type` | `message` |
+| `source` | `iaia_voluntary`: enviado voluntariamente desde IAIA. Lo distingue de las respuestas a una llamada (`ack` con `stage: reply`) y de futuras alertas automáticas. La app muestra «Missatge enviat voluntàriament des d'IAIA». |
+| `text` | Texto transcrito (máx. 500 caracteres) |
+| `ts` | Segundos Unix |
+
+Confirmación de la app: al mostrar el mensaje, la app publica en `cmd`:
+
+```json
+{"id": "v1a2b3c4d5", "type": "msg_ack", "ts": 1731930002}
+```
+
+El puente espera este `msg_ack` hasta 5 s. Estados reales del envío: `published` (el broker aceptó la publicación, pero no se sabe si la app lo recibió) y `delivered` (la app confirmó). Solo en `delivered` IAIA dice «Missatge enviat.»; en `published` dice que lo ha enviado pero aún no tiene confirmación. El puente no reenvía el mismo texto en 30 s y no envía textos vacíos.
+
+Permisos ACL necesarios: el puente (Pi) escribe en `iaia/<id>/messages`; la cuenta de la app lee `iaia/<id>/messages` y escribe en `iaia/<id>/cmd` (ya lo hacía).
+
+### 4.2 ter. `iaia/<id>/history`: historial común (retenido)
+
+Lo publica **solo la Raspberry** (QoS 1, retenido) cada vez que cambia el historial, y de nuevo al reconectar al broker. Todos los familiares vinculados a la misma IAIA (mismo `<id>`) reciben el mismo contenido nada más suscribirse, incluso si tenían la app cerrada. Los últimos 30 mensajes; los de más de 7 días caducan.
+
+```json
+{"v": 1, "ts": 1731930100, "items": [
+  {"id": "v1a2b3c4d5", "kind": "voluntary", "source": "iaia_voluntary", "text": "Hola, avui he anat a passejar", "from": "", "state": "delivered", "t": 1731930000},
+  {"id": "c3d4", "kind": "call", "text": "Has pres la medicació?", "from": "Maria", "state": "replied", "reply": "Sí, ja l'he presa", "t": 1731929000},
+  {"id": "a1b2", "kind": "say", "text": "Bon dia", "from": "Pau", "state": "said", "t": 1731928000}
+]}
+```
+
+| Campo | Descripción |
+|---|---|
+| `items` | Más nuevo primero, máximo 30 |
+| `kind` | `call` (llamada con respuesta), `say` (solo habla), `voluntary` (mensaje de la persona mayor) |
+| `from` | Nombre del familiar que envió el mensaje (vacío en los voluntarios) |
+| `state` | `call`: `received`, `replied`, `noreply`, `failed`. `say`: `received`, `said`, `failed`. `voluntary`: `published` o `delivered` |
+| `reply` | Respuesta transcrita (solo `call`) |
+| `source` | `iaia_voluntary` en los voluntarios: la app muestra «Missatge enviat voluntàriament des d'IAIA» |
+| `t` | Segundos Unix |
+
+Privacidad: contiene conversaciones. Solo debe poder leerlo cada familiar con cuenta propia y vinculado a esa IAIA, y solo la Pi puede escribir. La Pi no publica el historial salvo que `history_publish` esté activado en su configuración.
 
 ### 4.3 Respuesta a `ping`
 
