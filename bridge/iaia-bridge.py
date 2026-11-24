@@ -51,6 +51,15 @@ PREFIX = CONF.get("prefix", "iaia")
 T_STATUS = f"{PREFIX}/{DEVICE_ID}/status"
 T_CMD = f"{PREFIX}/{DEVICE_ID}/cmd"
 T_ACK = f"{PREFIX}/{DEVICE_ID}/ack"
+T_HISTORY = f"{PREFIX}/{DEVICE_ID}/history"        # Pi -> app, retenido (historial común)
+T_MESSAGES = f"{PREFIX}/{DEVICE_ID}/messages"     # Pi -> app: mensajes voluntarios (issue #7)
+APP_ACK_WAIT_S = 5        # tiempo esperando que la app confirme la recepción de un mensaje voluntario
+DUP_WINDOW_S = 30         # un mismo texto no se reenvía dentro de esta ventana
+MSG_MAX_CHARS = 500
+# Historial compartido (issue #7). La Pi es la única que escribe; se guarda en un fichero local (600) y,
+# solo si "history_publish" es true en la config, se publica retenido en iaia/<id>/history.
+HISTORY_MAX = 30                          # últimos 30 mensajes
+HISTORY_TTL_S = 7 * 24 * 3600             # caducidad: 7 días
 
 
 def log(*a):
@@ -191,6 +200,175 @@ def publish_status():
 
 def ack(mid, **kw):
     client.publish(T_ACK, json.dumps({"id": mid, **kw}), qos=1)
+    hist_on_ack(mid, kw)
+
+
+# ---- Historial compartido (issue #7) ----
+HISTORY_PATH = os.path.expanduser(CONF.get("history_path", "~/.local/state/iaia-bridge/history.json"))
+HISTORY_PUBLISH = bool(CONF.get("history_publish", False))   # False = solo se guarda en la Pi, NO se publica en el broker
+hist_lock = threading.Lock()
+hist_items = []           # más nuevo primero: {id, kind: call|say|voluntary, text, t, from, state, reply, source, err}
+
+
+def _hist_prune_locked():
+    limit = time.time() - HISTORY_TTL_S
+    n0 = len(hist_items)
+    hist_items[:] = [i for i in hist_items if i.get("t", 0) >= limit][:HISTORY_MAX]
+    return len(hist_items) != n0
+
+
+def hist_load():
+    try:
+        with open(HISTORY_PATH) as f:
+            data = json.load(f)
+        with hist_lock:
+            hist_items[:] = [i for i in data.get("items", []) if isinstance(i, dict) and i.get("id")]
+            hist_items.sort(key=lambda i: i.get("t", 0), reverse=True)
+            _hist_prune_locked()
+        log("Historial cargado:", len(hist_items), "mensajes")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log("Historial ilegible, empiezo vacío:", e)
+
+
+def _hist_save_locked():
+    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+    tmp = HISTORY_PATH + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"v": 1, "items": hist_items}, f, ensure_ascii=False)
+    os.replace(tmp, HISTORY_PATH)
+
+
+def hist_publish():
+    """Publica el historial retenido (QoS 1). Solo si history_publish está activado en la config."""
+    if not HISTORY_PUBLISH or not client.is_connected():
+        return
+    with hist_lock:
+        _hist_prune_locked()
+        payload = json.dumps({"v": 1, "ts": int(time.time()), "items": hist_items}, ensure_ascii=False)
+    client.publish(T_HISTORY, payload, qos=1, retain=True)
+
+
+def hist_add(item):
+    item.setdefault("t", int(time.time()))
+    with hist_lock:
+        hist_items[:] = [i for i in hist_items if i.get("id") != item["id"]]
+        hist_items.insert(0, item)
+        _hist_prune_locked()
+        _hist_save_locked()
+    hist_publish()
+
+
+def hist_update(mid, **kw):
+    with hist_lock:
+        it = next((i for i in hist_items if i.get("id") == mid), None)
+        if not it:
+            return False
+        it.update({k: v for k, v in kw.items() if v is not None})
+        _hist_save_locked()
+    hist_publish()
+    return True
+
+
+def hist_on_ack(mid, kw):
+    """Convierte los ack finales de las órdenes de la app en estado del historial."""
+    st = kw.get("stage")
+    with hist_lock:
+        it = next((i for i in hist_items if i.get("id") == mid), None)
+        kind = it.get("kind") if it else None
+    if kind == "call" and st == "reply":
+        if kw.get("ok") and str(kw.get("text", "")).strip():
+            hist_update(mid, state="replied", reply=str(kw["text"])[:MSG_MAX_CHARS])
+        elif kw.get("ok"):
+            hist_update(mid, state="noreply")
+        else:
+            hist_update(mid, state="failed", err=str(kw.get("error", ""))[:200])
+    elif kind == "say" and st == "said":
+        hist_update(mid, state="said" if kw.get("ok") else "failed", err=None if kw.get("ok") else str(kw.get("error", ""))[:200])
+
+
+def _from(cmd):
+    return " ".join(str(cmd.get("from", "")).split())[:40]
+
+
+hist_load()
+
+
+# ---- Mensajes voluntarios de la persona mayor hacia la app (issue #7) ----
+# Estados reales del envío (nunca se da por recibido solo porque el broker lo aceptó):
+#   published = el broker confirmó la publicación (PUBACK)    delivered = además la app confirmó la recepción
+app_waiters = {}          # id del mensaje -> Event, lo activa el ack de la app (cmd {"type":"msg_ack","id":...})
+recent_sent = {}          # texto normalizado -> hora del último envío (anti-duplicados)
+send_lock = threading.Lock()
+
+
+def send_to_app(texto, source="iaia_voluntary", mid=None, tipo="message"):
+    """Publica el mensaje en iaia/<id>/messages. Devuelve (publicado_en_broker, id, error)."""
+    mid = mid or f"m{int(time.time() * 1000):x}"
+    if not client.is_connected():
+        log("ERROR send_to_app: sin conexión MQTT")
+        return False, mid, "Sin conexión con el broker"
+    payload = {"id": mid, "type": tipo, "source": source, "text": str(texto), "ts": int(time.time())}
+    try:
+        res = client.publish(T_MESSAGES, json.dumps(payload, ensure_ascii=False), qos=1, retain=False)
+        if res.rc != mqtt.MQTT_ERR_SUCCESS:
+            log("ERROR send_to_app: rc", res.rc)
+            return False, mid, f"Error MQTT {res.rc}"
+        res.wait_for_publish(timeout=5)
+        if not res.is_published():
+            log("ERROR send_to_app: el broker no confirmó la publicación")
+            return False, mid, "El broker no confirmó la publicación"
+        log("send_to_app: publicado y confirmado por el broker", mid, source)
+        return True, mid, ""
+    except Exception as e:
+        log("ERROR send_to_app:", e)
+        return False, mid, str(e)
+
+
+def _do_app_send(data):
+    sid = str(data.get("id", ""))
+    text = str(data.get("text", "")).strip()[:MSG_MAX_CHARS]
+    source = str(data.get("source", "iaia_voluntary"))
+
+    def done(**kw):
+        bus.emit(Message("iaia.app.sent", {"id": sid, **kw}))
+
+    if not text or not any(ch.isalnum() for ch in text):
+        return done(ok=False, stage="rejected", error="Mensaje vacío")
+    key = " ".join(text.lower().split())
+    with send_lock:
+        now = time.time()
+        for k in [k for k, t in recent_sent.items() if now - t > DUP_WINDOW_S]:
+            recent_sent.pop(k, None)
+        if key in recent_sent:
+            log("Mensaje duplicado ignorado")
+            return done(ok=False, stage="rejected", error="duplicat")
+        recent_sent[key] = now
+        ev = threading.Event(); app_waiters[sid] = ev
+    try:
+        published, mid, err = send_to_app(text, source=source, mid=sid or None)
+        if not published:
+            with send_lock:
+                recent_sent.pop(key, None)      # el intento falló: permite reintentar
+            return done(ok=False, stage="failed", error=err)
+        if ev.wait(APP_ACK_WAIT_S):
+            log("La app confirmó la recepción", mid)
+            hist_add({"id": mid, "kind": "voluntary", "source": source, "text": text, "from": "", "state": "delivered"})
+            return done(ok=True, stage="delivered")
+        log("Publicado, pero la app no ha confirmado la recepción en", APP_ACK_WAIT_S, "s")
+        hist_add({"id": mid, "kind": "voluntary", "source": source, "text": text, "from": "", "state": "published"})
+        return done(ok=True, stage="published")
+    finally:
+        app_waiters.pop(sid, None)
+
+
+def on_app_send(message):
+    threading.Thread(target=_do_app_send, args=(dict(message.data),), daemon=True).start()
+
+
+bus.on("iaia.app.send", on_app_send)
 
 
 def on_disconnect(c, userdata, *args):
@@ -209,6 +387,7 @@ def on_connect(c, userdata, flags, rc, *extra):
     log("Conectado al broker")
     c.subscribe(T_CMD, qos=1)
     publish_status()
+    hist_publish()                                     # restituye el historial retenido si el broker lo hubiera perdido
 
 
 def handle_cmd(payload: bytes):
@@ -217,6 +396,11 @@ def handle_cmd(payload: bytes):
         mid = cmd["id"]
     except Exception:
         return log("Comando ilegible, ignorado")
+    if cmd.get("type") == "msg_ack":                               # la app confirma que recibió un mensaje voluntario
+        ev = app_waiters.get(str(mid))
+        if ev:
+            ev.set()
+        return
     if cmd.get("type") == "ping":                                  # ping/pong: responde al instante y no habla
         if abs(time.time() - cmd.get("ts", time.time())) > 120:
             return ack(mid, stage="pong", ok=False, error="Ping caducado")
@@ -225,6 +409,7 @@ def handle_cmd(payload: bytes):
     if cmd.get("type") == "ask" and str(cmd.get("text", "")).strip():
         if abs(time.time() - cmd.get("ts", time.time())) > 120:
             return ack(mid, stage="reply", ok=False, error="Mensaje caducado")
+        hist_add({"id": mid, "kind": "call", "text": str(cmd["text"])[:MAX_CHARS], "from": _from(cmd), "state": "received"})
         ack(mid, stage="received")
         try:
             ask(mid, str(cmd["text"]))
@@ -237,6 +422,7 @@ def handle_cmd(payload: bytes):
         return ack(mid, ok=False, error="Comando no válido")
     if abs(time.time() - cmd.get("ts", time.time())) > 120:      # evita repeticiones de mensajes viejos
         return ack(mid, ok=False, error="Mensaje caducado")
+    hist_add({"id": mid, "kind": "say", "text": str(cmd["text"])[:MAX_CHARS], "from": _from(cmd), "state": "received"})
     ack(mid, stage="received")
     try:
         say(str(cmd["text"]))
@@ -273,3 +459,9 @@ client.loop_start()
 while True:
     time.sleep(HEARTBEAT_S)
     publish_status()
+    with hist_lock:
+        changed = _hist_prune_locked()
+        if changed:
+            _hist_save_locked()
+    if changed:
+        hist_publish()                                 # algún mensaje ha caducado (7 días)
