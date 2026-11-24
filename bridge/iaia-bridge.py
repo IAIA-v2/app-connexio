@@ -167,10 +167,11 @@ def ask(mid: str, text: str) -> None:
 # ---- MQTT ----
 def make_client() -> mqtt.Client:
     cid = f"iaia-bridge-{DEVICE_ID}"
+    transport = CONF.get("transport", "tcp")           # "tcp" (8883/1883) o "websockets" (p. ej. 443 tras un proxy)
     try:
-        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid)   # paho-mqtt >= 2
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=cid, transport=transport)   # paho-mqtt >= 2
     except AttributeError:
-        return mqtt.Client(client_id=cid)                                      # paho-mqtt 1.x
+        return mqtt.Client(client_id=cid, transport=transport)                                      # paho-mqtt 1.x
 
 
 client = make_client()
@@ -178,6 +179,9 @@ if CONF.get("username"):
     client.username_pw_set(CONF["username"], CONF.get("password"))
 if CONF.get("tls", True):
     client.tls_set()   # valida el certificado del broker con las CA del sistema
+if CONF.get("transport") == "websockets":
+    client.ws_set_options(path=CONF.get("ws_path", "/mqtt"))
+client.reconnect_delay_set(min_delay=1, max_delay=int(CONF.get("reconnect_max_s", 120)))
 client.will_set(T_STATUS, json.dumps({"online": False, "ts": int(time.time())}), qos=1, retain=True)
 
 
@@ -187,6 +191,14 @@ def publish_status():
 
 def ack(mid, **kw):
     client.publish(T_ACK, json.dumps({"id": mid, **kw}), qos=1)
+
+
+def on_disconnect(c, userdata, *args):
+    log("Desconectado del broker", args[-2] if len(args) >= 2 else "")   # así un fallo de red ya no es silencioso
+
+
+def on_connect_fail(c, userdata, *args):
+    log("No se pudo conectar con el broker", CONF.get("host"), CONF.get("port"), "transporte:", CONF.get("transport", "tcp"))
 
 
 def on_connect(c, userdata, flags, rc, *extra):
@@ -240,6 +252,8 @@ def on_message(c, userdata, msg):
 
 
 client.on_connect = on_connect
+client.on_disconnect = on_disconnect
+client.on_connect_fail = on_connect_fail
 client.on_message = on_message
 
 
@@ -254,7 +268,7 @@ def stop(*_):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 
-client.connect_async(CONF["host"], int(CONF.get("port", 8883)), keepalive=30)
+client.connect_async(CONF["host"], int(CONF.get("port", 8883)), keepalive=int(CONF.get("keepalive", 30)))
 client.loop_start()
 while True:
     time.sleep(HEARTBEAT_S)
