@@ -40,6 +40,8 @@ HEARTBEAT_S = 30
 MAX_CHARS = 300
 SPEAK_TIMEOUT_S = 45
 ACCEPT_TIMEOUT_S = 4      # la skill iaia-familia debe responder en este tiempo
+START_TIMEOUT_S = 8       # tras la frase disparadora, la skill debe empezar en este tiempo
+TRIGGER_UTTERANCE = "inicia la trucada de la família"   # debe coincidir con locale/ca-ES/intents/trucada.intent de la skill
 REPLY_TIMEOUT_S = 60      # tiempo máximo esperando la respuesta de la persona
 
 with open(CONF_PATH) as f:
@@ -101,7 +103,7 @@ def _on_familia(name):
     return handler
 
 
-for _n in ("accepted", "spoken", "listening", "reply"):
+for _n in ("accepted", "started", "spoken", "listening", "reply"):
     bus.on(f"iaia.familia.{_n}", _on_familia(_n))
 
 
@@ -123,12 +125,26 @@ def ask(mid: str, text: str) -> None:
         try:
             bus.emit(Message("iaia.familia.ask", {"id": mid, "text": prepare_for_tts(text)}))
             try:
-                _wait_event(q, "accepted", ACCEPT_TIMEOUT_S)
+                name, d = _wait_event(q, "accepted", ACCEPT_TIMEOUT_S)
+                if name == "reply":
+                    return ack(mid, stage="reply", ok=False, error=d.get("error", "Error en la skill"))
             except queue.Empty:
                 log("La skill iaia-familia no respondió: digo el mensaje sin escuchar")
                 _speak(text)
                 ack(mid, stage="said", ok=True)
                 return ack(mid, stage="reply", ok=False, error="Iaia ha dicho el mensaje, pero no puede escuchar: falta instalar la skill iaia-familia.")
+            # La skill solo puede capturar la respuesta si ovos-core le despacha una intención:
+            # enviamos la frase disparadora como si fuera una orden de voz.
+            bus.emit(Message("recognizer_loop:utterance", {"utterances": [TRIGGER_UTTERANCE], "lang": "ca-ES"},
+                             {"source": "audio", "destination": "skills", "client_name": "iaia-bridge"}))
+            try:
+                _wait_event(q, "started", START_TIMEOUT_S)
+            except queue.Empty:
+                bus.emit(Message("iaia.familia.cancel", {"id": mid}))
+                log("La skill no recibió la intención disparadora: digo el mensaje sin escuchar")
+                _speak(text)
+                ack(mid, stage="said", ok=True)
+                return ack(mid, stage="reply", ok=False, error="Iaia ha dicho el mensaje, pero no pudo ponerse a escuchar (la orden interna no llegó a la skill).")
             name, d = _wait_event(q, "spoken", SPEAK_TIMEOUT_S)
             if name == "reply":
                 return ack(mid, stage="reply", ok=False, error=d.get("error", "Error en la skill"))

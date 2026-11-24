@@ -126,7 +126,8 @@ fetch bridge/iaia-bridge.service "$UNIT_DST"
 # ---- 3b. skill de escucha (opcional): hace falta para «Llamar y esperar respuesta»
 SKILL_DIR="$HOME/iaia-skill-familia"; SKILL_CHANGED=""
 if yesno "¿Instalar también la skill de escucha (Iaia dice el mensaje, escucha y devuelve la respuesta)?" s; then
-  mkdir -p "$SKILL_DIR/ovos_skill_iaia_familia"
+  mkdir -p "$SKILL_DIR/ovos_skill_iaia_familia/locale/ca-ES/intents"
+  fetch skill/ovos-skill-iaia-familia/ovos_skill_iaia_familia/locale/ca-ES/intents/trucada.intent "$SKILL_DIR/ovos_skill_iaia_familia/locale/ca-ES/intents/trucada.intent"
   fetch skill/ovos-skill-iaia-familia/setup.py "$SKILL_DIR/setup.py"
   fetch skill/ovos-skill-iaia-familia/ovos_skill_iaia_familia/__init__.py "$SKILL_DIR/ovos_skill_iaia_familia/__init__.py"
   for f in "$SKILL_DIR/setup.py" "$SKILL_DIR/ovos_skill_iaia_familia/__init__.py"; do

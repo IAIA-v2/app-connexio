@@ -120,7 +120,9 @@ En la ficha del dispositivo, **📞 Llamar y esperar respuesta** hace esto:
 
 Estados que ve el familiar: Enviando, Recibido, Dicho, Escuchando, Respondió o Sin respuesta (si la persona no dice nada).
 
-Cómo está hecho: el puente (`bridge/iaia-bridge.py`) no puede escuchar por sí solo, así que habla con una skill de OVOS, `skill/ovos-skill-iaia-familia`, por el bus (`iaia.familia.ask` y respuestas). La skill usa `get_response()`, que captura la respuesta por el mecanismo `converse`. Lo que diga la persona **no llega al LLM ni a otras skills**. `install.sh` ofrece instalarla: simula la instalación (`--dry-run --no-deps`), comprueba que no toca los paquetes protegidos de OVOS y pide reiniciar `ovos-skills`.
+Cómo está hecho: el puente (`bridge/iaia-bridge.py`) no puede escuchar por sí solo, así que habla con una skill de OVOS, `skill/ovos-skill-iaia-familia`, por el bus (`iaia.familia.ask` y respuestas). La skill usa `get_response()`, que captura la respuesta por el mecanismo `converse`. Lo que diga la persona **no llega al LLM ni a otras skills**.
+
+`get_response()` solo funciona si ovos-core considera a la skill «dueña de la conversación», y eso solo ocurre cuando le despacha una **intención** (comprobado en los logs y en el código de ovos-core 3.7.5: un evento del bus no basta, y la respuesta acababa en el LLM). Por eso, después de pasarle el texto, el puente envía la frase fija «inicia la trucada de la família» como si fuera una orden de voz; la skill la recibe en `trucada.intent` y desde ahí dice el mensaje y escucha. Si alguien dijera esa frase sin llamada pendiente, no pasa nada. La frase del puente (`TRIGGER_UTTERANCE`) y la del `.intent` deben coincidir. `install.sh` ofrece instalarla: simula la instalación (`--dry-run --no-deps`), comprueba que no toca los paquetes protegidos de OVOS y pide reiniciar `ovos-skills`.
 
 Si la skill no está instalada, Iaia dice el mensaje igualmente y la app avisa de que no puede escuchar.
 
