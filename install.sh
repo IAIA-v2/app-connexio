@@ -209,7 +209,7 @@ if [ -n "${IAIA_NO_SERVICE:-}" ]; then
 else
   : >"$LOG"
   systemctl --user daemon-reload
-  systemctl --user enable --now iaia-bridge.service || die "No se pudo activar el servicio. Si estás por SSH prueba: export XDG_RUNTIME_DIR=/run/user/\$(id -u)"
+  systemctl --user enable iaia-bridge.service && systemctl --user restart iaia-bridge.service || die "No se pudo activar el servicio. Si estás por SSH prueba: export XDG_RUNTIME_DIR=/run/user/\$(id -u)"
   for _ in $(seq 1 20); do grep -aq "Conectado al broker" "$LOG" 2>/dev/null && break; sleep 1; done
   if grep -aq "Conectado al broker" "$LOG" 2>/dev/null; then ok "El puente se ha conectado al broker"
   else
