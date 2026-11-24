@@ -114,6 +114,7 @@ Errores de `ask` que conviene conocer:
 | `Iaia ha dicho el mensaje, pero no puede escuchar: falta instalar la skill iaia-familia.` | La skill no respondió en 4 s. Antes se envía `said` con `ok: true`. |
 | `La Iaia no terminó la llamada a tiempo.` | No llegó la respuesta a tiempo |
 | `Mensaje caducado` | `ts` fuera de ±120 s. No se envía `received`. |
+| `Iaia ha dicho el mensaje, pero no pudo ponerse a escuchar (la orden interna no llegó a la skill).` | La skill aceptó el texto pero no recibió la intención disparadora en 8 s. Antes se envía `said` con `ok: true`. |
 | Error de la skill (p. ej. `Mensaje vacío`) | La skill lo devuelve |
 
 ### 4.3 Respuesta a `ping`
@@ -141,6 +142,7 @@ Un `say` con `type` desconocido, `text` vacío o `ts` caducado recibe un `ack` *
 | App | 45 s | Esperar el `ack` final de un `say` |
 | App | 150 s | Esperar el `reply` de un `ask` |
 | Puente | 4 s | La skill debe aceptar el `ask` |
+| Puente | 8 s | La skill debe empezar (`started`) tras la frase disparadora |
 | Puente | 45 s | Terminar de hablar |
 | Puente | 60 s | Esperar la respuesta de la persona |
 | Puente | 120 s | Antigüedad máxima admitida de un comando (`ts`) |
@@ -153,12 +155,17 @@ Solo para `ask`. No pasa por MQTT.
 | Mensaje del bus | Sentido | Datos |
 |---|---|---|
 | `iaia.familia.ask` | puente → skill | `id`, `text` |
-| `iaia.familia.accepted` | skill → puente | `id` |
+| `iaia.familia.accepted` | skill → puente | `id` (texto guardado, aún no se dice) |
+| *(frase disparadora)* | puente → ovos-core | `recognizer_loop:utterance` con «inicia la trucada de la família» |
+| `iaia.familia.started` | skill → puente | `id` (la intención llegó a la skill) |
+| `iaia.familia.cancel` | puente → skill | `id` (olvidar el texto pendiente) |
 | `iaia.familia.spoken` | skill → puente | `id` |
 | `iaia.familia.listening` | skill → puente | `id` |
 | `iaia.familia.reply` | skill → puente | `id`, `ok`, `text` (vacío si no hubo respuesta), `error` |
 
-El puente traduce cada uno al `ack` correspondiente (`accepted` no se reenvía a la app).
+El puente traduce cada uno al `ack` correspondiente (`accepted` y `started` no se reenvían a la app).
+
+**Por qué la frase disparadora:** `get_response()` solo captura la respuesta si ovos-core considera a la skill dueña de la conversación, y eso solo ocurre cuando le despacha una intención (un evento del bus no basta). Tras `accepted`, el puente envía la frase como si fuera una orden de voz; la skill la recibe en `trucada.intent`, y desde ahí dice el texto y escucha. La frase (`TRIGGER_UTTERANCE` en el puente) y la de `locale/ca-ES/intents/trucada.intent` deben coincidir.
 
 ## 7. Límites conocidos de la v0.1
 
