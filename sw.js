@@ -1,6 +1,6 @@
 /* Service worker: guarda la "carcasa" de la app para que abra al instante y sin red.
    El estado de los dispositivos NUNCA se cachea: llega siempre en vivo por MQTT. */
-const CACHE = 'iaia-remoto-v2';
+const CACHE = 'iaia-remoto-v3';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
