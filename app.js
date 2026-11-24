@@ -142,7 +142,7 @@ class Mqtt {
       const logs = S.logs[id] || [];
       if (logs.some(e => e.mid === j.id)) return;                                        // ya mostrado (reentrega QoS 1)
       addLog(id, { mid: j.id, text: j.text, t: j.ts ? j.ts * 1000 : Date.now(), state: 'incoming', source: j.source || '' });
-      toast('Mensaje de la Iaia: ' + j.text.slice(0, 80));
+      toast('Missatge de la Iaia: ' + j.text.slice(0, 80));
       refresh();
     }
   }
@@ -282,11 +282,11 @@ function timeline(id) {
 function whoHtml(m) {
   if (m.source === 'iaia_voluntary') return '';
   const n = (m.from || '').trim();
-  return n ? '👤 ' + esc(n === (S.settings.name || '').trim() ? 'Tú' : n) + ' · ' : '';
+  return n ? '👤 ' + esc(n === (S.settings.name || '').trim() ? 'Tu' : n) + ' · ' : '';
 }
 function logHtml(id) {
   const l = timeline(id);
-  if (!l.length) return '<p class="hint">Todavía no hay mensajes de la familia con esta Iaia.</p>';
+  if (!l.length) return '<p class="hint">Encara no hi ha missatges de la família amb aquesta Iaia.</p>';
   return `<ul class="log">${l.map(m => { const [lab, cls] = stateLabel(m.state);
     return `<li><div>${m.source === 'iaia_voluntary' ? '<div class="t">Missatge enviat voluntàriament des d\'IAIA</div>' : ''}<div>${m.ask ? '📞 ' : ''}${esc(m.text)}</div><div class="t">${whoHtml(m)}${hhmm(m.t)}${m.err ? ' · ' + esc(m.err) : ''}</div>${m.reply ? `<div class="reply">${esc(m.reply)}</div>` : ''}</div><span class="st ${cls}">${lab}</span></li>`; }).join('')}</ul>`;
 }
@@ -317,9 +317,9 @@ function vDev(d) {
       <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Llamar y esperar respuesta</button>
       <button class="btn block ghost" id="send" data-act="send" style="margin-top:8px" ${o ? '' : 'disabled'}>🔊 Solo que lo diga</button>
       <p class="hint" style="margin-top:8px">«Llamar»: Iaia dice el mensaje, escucha una respuesta de la persona y te la envía.</p>
-      <p class="hint">${S.settings.name ? 'Enviarás como <b>' + esc(S.settings.name) + '</b>.' : 'Pon tu nombre en <a href="#ajustes">Ajustes</a> para que tu familia sepa quién escribe.'}</p>
+      <p class="hint">${S.settings.name ? 'Enviaràs com a <b>' + esc(S.settings.name) + '</b>.' : 'Posa el teu nom a <a href="#ajustes">Ajustes</a> perquè la teva família sàpiga qui escriu.'}</p>
       <p class="hint" id="sendhint">${o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.'}</p></div>
-    <h2>Grup familiar - missatges recents</h2><p class="hint" style="margin:0 0 6px">Todos los familiares con esta Iaia ven los mismos mensajes (últimos 30, 7 días).</p><div class="panel" id="log">${logHtml(d.id)}</div>
+    <h2>Grup familiar - missatges recents</h2><p class="hint" style="margin:0 0 6px">Tots els familiars amb aquesta Iaia veuen els mateixos missatges (últims 30, 7 dies).</p><div class="panel" id="log">${logHtml(d.id)}</div>
     <h2>Dispositivo</h2><div class="panel">
       <label for="rn" style="margin-top:0">Nombre</label>
       <div class="row"><input type="text" id="rn" value="${esc(d.name)}" maxlength="30"><button class="btn small ghost" data-act="rename">Guardar</button></div>
@@ -371,8 +371,8 @@ function vSet() {
   return `<header class="top"><div><h1>Ajustes</h1><p class="sub">Versión 0.1 (prototipo)</p></div>${connBadge()}</header>
     <div class="seg"><button data-act="mode" data-m="demo" class="${demo ? 'act' : ''}">Demo</button><button data-act="mode" data-m="mqtt" class="${demo ? '' : 'act'}">Conexión real</button></div>
     <div style="height:14px"></div>
-    <h2>Tu nombre</h2><div class="panel"><label for="myname" style="margin-top:0">Así te verá tu familia en los mensajes</label>
-      <div class="row"><input type="text" id="myname" value="${esc(s.name || '')}" maxlength="30" placeholder="Por ejemplo: Maria" autocomplete="off"><button class="btn small" data-act="savename">Guardar</button></div></div>
+    <h2>El teu nom</h2><div class="panel"><label for="myname" style="margin-top:0">Així et veurà la teva família als missatges</label>
+      <div class="row"><input type="text" id="myname" value="${esc(s.name || '')}" maxlength="30" placeholder="Per exemple: Maria" autocomplete="off"><button class="btn small" data-act="savename">Desa</button></div></div>
     ${real}${sim}
     <h2>Datos</h2><div class="panel"><button class="btn small danger" data-act="reset">Borrar todo en este móvil</button></div>`;
 }
@@ -482,7 +482,7 @@ const actions = {
     store.save('settings', S.settings); useTransport(); toast('Conectando…');
   },
   power(el) { S.tr.setPower(el.dataset.id, el.checked); toast(el.checked ? 'Iaia encendida' : 'Iaia apagada'); },
-  savename() { S.settings.name = ($('#myname').value || '').replace(/\s+/g, ' ').trim().slice(0, 30); store.save('settings', S.settings); toast(S.settings.name ? 'Nombre guardado: ' + S.settings.name : 'Nombre borrado'); },
+  savename() { S.settings.name = ($('#myname').value || '').replace(/\s+/g, ' ').trim().slice(0, 30); store.save('settings', S.settings); toast(S.settings.name ? 'Nom desat: ' + S.settings.name : 'Nom esborrat'); },
   sound(el) { S.settings.sound = el.checked; store.save('settings', S.settings); },
   reset(el) {
     if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Pulsa otra vez para confirmar'; return; }
