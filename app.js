@@ -311,7 +311,9 @@ function vDev(d) {
       <button class="btn small ghost" id="ping" data-act="ping">📡 Ping</button></div>
       <div id="pingres">${pingHtml(d.id)}</div></div>
     <div class="panel"><label for="msg" style="margin-top:0">Missatge perquè ho digui en veu alta</label>
-      <textarea id="msg" maxlength="300">Hello World</textarea>
+      <div class="msgbox"><textarea id="msg" maxlength="300">Hello World</textarea>
+        <button class="mic" id="mic" data-act="vtoggle" type="button" aria-label="Dicta el missatge amb la veu" title="Dicta el missatge amb la veu"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button></div>
+      <div class="vbar" id="vbar" hidden aria-live="polite"></div>
       <div class="row"><span class="hint" style="margin:0">Ho dirà amb la veu de la Iaia, tal com ho escriguis. Millor en català.</span><span class="count" id="cnt">11/300</span></div>
       <div class="chips">${PRESETS.map(p => `<button class="chip" data-act="preset" data-t="${esc(p)}">${esc(p)}</button>`).join('')}</div>
       <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Truca i espera resposta</button>
@@ -381,6 +383,7 @@ function vSet() {
 const app = $('#app');
 const hash = () => location.hash.slice(1) || 'inicio';
 function render(keep) {
+  voiceAbort();
   const h = hash(); let html;
   if (h === 'nuevo') html = vAdd();
   else if (h === 'ajustes') html = vSet();
@@ -404,6 +407,85 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
     return;
   }
   render(true);
+}
+
+/* ---------- dictat per veu (Web Speech API, només al navegador; el text no s'envia fins que l'usuari ho decideix) ---------- */
+const voice = { st: 'idle', rec: null, base: '', last: '', fin: '', interim: '', err: '', msg: '', timer: null };
+const speechCtor = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+const VOICE_ERR = {
+  'not-allowed': 'No tinc permís per al micròfon. Permet-lo als ajustos del navegador i torna-ho a provar.',
+  'service-not-allowed': 'El navegador no permet el dictat per veu. Fes servir el micròfon del teclat del mòbil.',
+  'audio-capture': 'No es detecta cap micròfon.',
+  'network': 'Cal connexió a internet per al dictat per veu.',
+  'language-not-supported': 'El dictat en català no està disponible en aquest navegador.',
+  'no-speech': 'No he sentit res. Torna-ho a provar.',
+  'timeout': 'No s’ha pogut transcriure. Torna-ho a provar.',
+  'unsupported': 'Aquest navegador no admet el dictat per veu. Fes servir el micròfon del teclat del mòbil.',
+};
+function voiceUI() {
+  const bar = $('#vbar'), mic = $('#mic'); if (!bar || !mic) return;
+  const act = voice.st === 'rec' || voice.st === 'proc', id = hash().slice(2);
+  mic.classList.toggle('rec', voice.st === 'rec');
+  mic.disabled = voice.st === 'proc';
+  mic.setAttribute('aria-label', voice.st === 'rec' ? 'Atura la gravació' : 'Dicta el missatge amb la veu');
+  ['#call', '#send'].forEach(q => {
+    const b = $(q); if (!b) return;
+    if (act) { b.disabled = true; b.setAttribute('data-busy', 'veu'); }
+    else if (b.getAttribute('data-busy') === 'veu') { b.removeAttribute('data-busy'); b.disabled = !isOnline(id); }
+  });
+  let h = '', cls = 'vbar';
+  if (voice.st === 'rec') h = `<div class="vtxt"><span class="rd"></span><b>Gravant…</b> Parla ara.</div>${voice.interim ? `<div class="vint">${esc(voice.interim)}</div>` : ''}<div class="vact"><button class="btn small" type="button" data-act="vtoggle">⏹ Atura</button><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
+  else if (voice.st === 'proc') h = `<div class="vtxt"><b>Transcrivint…</b></div><div class="vact"><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
+  else if (voice.st === 'done') h = `<div class="vtxt">✔ <b>Text transcrit.</b> Revisa’l i corregeix-lo abans d’enviar-lo.</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna a gravar</button><button class="btn small ghost" type="button" data-act="vclear">Esborra</button></div>`;
+  else if (voice.st === 'err') { cls += ' err'; h = `<div class="vtxt">⚠ ${esc(voice.msg)}</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna-ho a provar</button></div>`; }
+  bar.className = cls; bar.hidden = !h; bar.innerHTML = h;
+}
+function voiceSet(st, msg) { voice.st = st; voice.msg = msg || ''; voiceUI(); }
+function voiceAbort() {   // cancel·la sense tocar el text (canvi de vista, app en segon pla…)
+  clearTimeout(voice.timer);
+  const r = voice.rec; voice.rec = null;
+  if (r) { try { r.abort(); } catch (_) { } }
+  voice.st = 'idle'; voice.msg = ''; voice.interim = '';
+}
+function voiceStart() {
+  if (voice.st === 'rec' || voice.st === 'proc') return;
+  const C = speechCtor(), ta = $('#msg'); if (!ta) return;
+  if (!C) return voiceSet('err', VOICE_ERR.unsupported);
+  let r; try { r = new C(); } catch (_) { return voiceSet('err', VOICE_ERR.unsupported); }
+  voice.base = ta.value === voice.last ? '' : ta.value;   // si el text dictat no s'ha tocat, es reemplaça; si no, s'afegeix al final
+  voice.fin = ''; voice.interim = ''; voice.err = '';
+  r.lang = 'ca-ES'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+  r.onresult = e => {
+    if (r !== voice.rec) return;
+    let f = '', i2 = '';
+    for (let i = 0; i < e.results.length; i++) { const x = e.results[i]; (x.isFinal ? (f += x[0].transcript) : (i2 += x[0].transcript)); }
+    voice.fin = f; voice.interim = i2; if (voice.st === 'rec') voiceUI();
+  };
+  r.onspeechend = () => { if (r === voice.rec && voice.st === 'rec') voiceSet('proc'); };
+  r.onerror = e => { if (r === voice.rec) voice.err = e.error || 'error'; };
+  r.onend = () => voiceEnd(r);
+  voice.rec = r; voiceSet('rec');
+  try { r.start(); } catch (_) { voice.rec = null; voiceSet('err', 'No s’ha pogut iniciar el micròfon.'); }
+}
+function voiceEnd(r) {
+  if (r !== voice.rec) return;
+  clearTimeout(voice.timer); voice.rec = null;
+  const txt = (voice.fin || voice.interim).replace(/\s+/g, ' ').trim();
+  if (!txt) {
+    if (voice.err === 'aborted') return voiceSet('idle');
+    return voiceSet('err', VOICE_ERR[voice.err] || VOICE_ERR['no-speech']);
+  }
+  const ta = $('#msg'); if (!ta) return voiceSet('idle');
+  const dict = txt.charAt(0).toUpperCase() + txt.slice(1);
+  const merged = ((voice.base ? voice.base.trimEnd() + ' ' : '') + dict).slice(0, 300);
+  ta.value = merged; voice.last = merged; $('#cnt').textContent = merged.length + '/300';
+  voiceSet('done');
+}
+function voiceStop() {
+  if (voice.st !== 'rec' || !voice.rec) return;
+  const r = voice.rec; voiceSet('proc');
+  try { r.stop(); } catch (_) { }
+  voice.timer = setTimeout(() => { if (voice.rec === r) { voice.err = voice.fin || voice.interim ? '' : 'timeout'; try { r.abort(); } catch (_) { } voiceEnd(r); } }, 8000);
 }
 
 /* ---------- acciones ---------- */
@@ -441,6 +523,10 @@ const actions = {
   hideinstall() { store.save('hideInstall', true); render(); },
   async install() { if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; render(); } },
   preset(el) { const ta = $('#msg'); ta.value = el.dataset.t; $('#cnt').textContent = ta.value.length + '/300'; },
+  vtoggle() { voice.st === 'rec' ? voiceStop() : voiceStart(); },
+  vstart() { voiceStart(); },
+  vcancel() { voiceAbort(); voiceUI(); },
+  vclear() { const ta = $('#msg'); if (ta) { ta.value = ''; $('#cnt').textContent = '0/300'; } voice.last = ''; voiceSet('idle'); },
   send() { doSend(hash().slice(2), false); },
   call() { doSend(hash().slice(2), true); },
   ping() { doPing(hash().slice(2)); },
@@ -502,6 +588,7 @@ app.addEventListener('input', e => {
   }
 });
 window.addEventListener('hashchange', () => render());
+document.addEventListener('visibilitychange', () => { if (document.hidden && (voice.st === 'rec' || voice.st === 'proc')) { voiceAbort(); voiceUI(); } });
 
 /* ---------- arranque ---------- */
 useTransport();
@@ -515,6 +602,7 @@ const loadedAt = Date.now();
 function idleForReload() {
   if (hash() === 'nuevo' || hash() === 'ajustes') return false;
   if ($('#call[data-busy],#send[data-busy],#ping[data-busy]')) return false;
+  if (voice.st === 'rec' || voice.st === 'proc') return false;
   const a = document.activeElement;
   if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)) return false;
   const m = $('#msg'); if (m && m.value !== m.defaultValue) return false;

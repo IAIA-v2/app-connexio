@@ -116,3 +116,19 @@ textarea{min-height:104px;resize:vertical}
 #toast.show{opacity:1;transform:translate(-50%,0)}
 
 .reply{margin-top:6px;padding:8px 11px;border-radius:12px 12px 12px 3px;background:var(--bg);border:1px solid var(--line);font-size:14px;max-width:100%}
+
+/* dictat per veu */
+.msgbox{position:relative}
+.msgbox textarea{padding-right:64px;resize:none}
+.mic{position:absolute;right:10px;bottom:10px;width:44px;height:44px;border-radius:50%;border:0;background:var(--green);color:#fff;display:grid;place-items:center;cursor:pointer;padding:0}
+.mic svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.mic:disabled{opacity:.5}
+.mic.rec{background:var(--red);animation:micpulse 1.2s infinite}
+@keyframes micpulse{0%{box-shadow:0 0 0 0 rgba(200,67,47,.5)}100%{box-shadow:0 0 0 14px rgba(200,67,47,0)}}
+@media (prefers-reduced-motion:reduce){.mic.rec{animation:none}}
+.vbar{margin-top:10px;padding:11px 13px;border-radius:12px;background:var(--bg);border:1.5px solid var(--line);font-size:14px}
+.vbar[hidden]{display:none}
+.vbar.err{background:var(--red-s);border-color:var(--red);color:var(--red)}
+.vbar .vint{margin-top:6px;color:var(--mut);font-style:italic}
+.vbar .vact{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.vbar .rd{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--red);margin-right:8px}
