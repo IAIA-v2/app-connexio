@@ -1,7 +1,7 @@
 {
-  "name": "Iaia Remoto",
+  "name": "Iaia Remot",
   "short_name": "Iaia",
-  "description": "Controla y comprueba el estado de tus asistentes Iaia (OVOS) desde cualquier lugar.",
+  "description": "Controla i comprova l’estat dels teus assistents Iaia (OVOS) des de qualsevol lloc.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

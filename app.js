@@ -20,15 +20,15 @@ const store = {
   save(k, v) { try { localStorage.setItem('iaia.' + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ } }
 };
 function ago(ts) {
-  if (!ts) return 'nunca';
+  if (!ts) return 'mai';
   const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 10) return 'ahora mismo';
-  if (s < 60) return `hace ${s} s`;
-  const m = Math.round(s / 60); if (m < 60) return `hace ${m} min`;
-  const h = Math.round(m / 60); if (h < 24) return `hace ${h} h`;
-  return `hace ${Math.round(h / 24)} d`;
+  if (s < 10) return 'ara mateix';
+  if (s < 60) return `fa ${s} s`;
+  const m = Math.round(s / 60); if (m < 60) return `fa ${m} min`;
+  const h = Math.round(m / 60); if (h < 24) return `fa ${h} h`;
+  return `fa ${Math.round(h / 24)} d`;
 }
-function hhmm(ts) { return new Date(ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' }); }
+function hhmm(ts) { return new Date(ts).toLocaleTimeString('ca', { hour: '2-digit', minute: '2-digit' }); }
 let toastT;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
 
@@ -71,29 +71,29 @@ class Demo {
   unwatch() { }
   async pair(code) {
     await sleep(700);
-    if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
+    if (!CODE_RE.test(code)) throw new Error('El codi no és vàlid. Té el format IAIA-XXXX-XXXX.');
     return { id: code };
   }
   async ping(id) {
     const t0 = performance.now();
-    if (!this.isOn(id)) { await sleep(3000); throw new Error('Sin respuesta (el dispositivo simulado está apagado).'); }
+    if (!this.isOn(id)) { await sleep(3000); throw new Error('Sense resposta (el dispositiu simulat està apagat).'); }
     await sleep(120 + Math.random() * 300);
     return { ms: Math.round(performance.now() - t0), bus: true, ver: 'demo' };
   }
   async ask(id, text, cb) {   // llamada simulada: dice, escucha y «responde» la persona
-    if (!this.isOn(id)) throw new Error('El dispositivo está inactivo.');
+    if (!this.isOn(id)) throw new Error('El dispositiu està inactiu.');
     cb('sent'); await sleep(350);
     cb('delivered'); await sleep(900 + text.length * 35);
     cb('spoken'); demoSpeak(text); await sleep(600);
     cb('listening'); await sleep(2200);
-    if (!this.isOn(id)) throw new Error('El dispositivo se desconectó mientras escuchaba.');
+    if (!this.isOn(id)) throw new Error('El dispositiu es va desconnectar mentre escoltava.');
     return { text: 'Sí, estic bé, gràcies. I tu?' };
   }
   async send(id, text, cb) {
-    if (!this.isOn(id)) throw new Error('El dispositivo está inactivo.');
+    if (!this.isOn(id)) throw new Error('El dispositiu està inactiu.');
     cb('sent'); await sleep(350);
     cb('delivered'); await sleep(900 + text.length * 35);
-    if (!this.isOn(id)) throw new Error('El dispositivo se desconectó antes de hablar.');
+    if (!this.isOn(id)) throw new Error('El dispositiu es va desconnectar abans de parlar.');
     cb('said'); demoSpeak(text);
   }
 }
@@ -104,7 +104,7 @@ function loadMqttLib() {
   return new Promise((ok, ko) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/mqtt@5/dist/mqtt.min.js';
-    s.onload = ok; s.onerror = () => ko(new Error('No se pudo cargar la librería MQTT.'));
+    s.onload = ok; s.onerror = () => ko(new Error('No es va poder carregar la llibreria MQTT.'));
     document.head.appendChild(s);
   });
 }
@@ -115,13 +115,13 @@ class Mqtt {
     this.stop(); setConn('off', 'Conectando…');
     const s = S.settings;
     const okUrl = /^wss:\/\//i.test(s.url) || (/^ws:\/\//i.test(s.url) && location.protocol === 'http:');
-    if (!okUrl) { setConn('err', location.protocol === 'http:' ? 'Indica una URL ws:// o wss:// del broker (Ajustes).' : 'Indica una URL wss:// del broker (Ajustes). ws:// solo vale si la app se abre por http (pruebas en la red local).'); return; }
+    if (!okUrl) { setConn('err', location.protocol === 'http:' ? 'Indica una URL ws:// o wss:// del broker (Configuració).' : 'Indica una URL wss:// del broker (Configuració). ws:// només serveix quan l’app s’obre per http (proves a la xarxa local).'); return; }
     try { await loadMqttLib(); } catch (e) { setConn('err', e.message); return; }
     this.c = window.mqtt.connect(s.url, { username: s.user || undefined, password: s.pass || undefined,
       clientId: 'iaia-pwa-' + uid(), reconnectPeriod: 3000, connectTimeout: 8000, clean: true });
     this.c.on('connect', () => { this.connected = true; setConn('ok'); S.devices.forEach(d => this.watch(d.id)); });
-    this.c.on('close', () => { this.connected = false; setConn('off', 'Sin conexión con el broker'); });
-    this.c.on('error', e => setConn('err', e.message || 'Error de conexión'));
+    this.c.on('close', () => { this.connected = false; setConn('off', 'Sense connexió amb el broker'); });
+    this.c.on('error', e => setConn('err', e.message || 'Error de connexió'));
     this.c.on('message', (topic, payload) => this.onMsg(topic, payload));
   }
   stop() { if (this.c) { try { this.c.end(true); } catch { } this.c = null; } this.connected = false; }
@@ -147,36 +147,36 @@ class Mqtt {
     }
   }
   async pair(code) {
-    if (!CODE_RE.test(code)) throw new Error('El código no es válido. Tiene el formato IAIA-XXXX-XXXX.');
+    if (!CODE_RE.test(code)) throw new Error('El codi no és vàlid. Té el format IAIA-XXXX-XXXX.');
     return { id: code };   // v0.1: el código es el identificador. En producción: canjearlo en la nube por credenciales propias.
   }
   ask(id, text, cb, mid0) {   // llamada: Iaia dice el texto, escucha una respuesta y la devuelve
-    if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
-    if (!isOnline(id)) return Promise.reject(new Error('El dispositivo está inactivo.'));
+    if (!this.connected) return Promise.reject(new Error('Sense connexió amb el broker.'));
+    if (!isOnline(id)) return Promise.reject(new Error('El dispositiu està inactiu.'));
     const mid = mid0 || uid();
     return new Promise((res, rej) => {
-      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('La llamada no terminó a tiempo.')); }, 150000);
+      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('La trucada no ha acabat a temps.')); }, 150000);
       this.pending.set(mid, j => {
         if (j.stage === 'received') return cb('delivered');
         if (j.stage === 'said') return cb('spoken');
         if (j.stage === 'listening') return cb('listening');
         if (j.stage !== 'reply') return;
         clearTimeout(to); this.pending.delete(mid);
-        if (j.ok) res({ text: String(j.text || '') }); else rej(new Error(j.error || 'Error en el dispositivo.'));
+        if (j.ok) res({ text: String(j.text || '') }); else rej(new Error(j.error || 'Error al dispositiu.'));
       });
       this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ask', text, from: S.settings.name || undefined, ts: Math.floor(Date.now() / 1000) }),
         { qos: 1 }, err => { if (err) { clearTimeout(to); this.pending.delete(mid); rej(err); } else cb('sent'); });
     });
   }
   ping(id) {   // ping/pong: la Iaia contesta al instante, sin hablar. No exige que figure como activa.
-    if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
+    if (!this.connected) return Promise.reject(new Error('Sense connexió amb el broker.'));
     const mid = uid(), t0 = performance.now();
     return new Promise((res, rej) => {
-      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('Sin respuesta en 8 segundos.')); }, 8000);
+      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('Sense resposta en 8 segons.')); }, 8000);
       this.pending.set(mid, j => {
         if (j.stage !== 'pong') return;
         clearTimeout(to); this.pending.delete(mid);
-        if (j.ok === false) rej(new Error(j.error || 'Error en el dispositivo.'));
+        if (j.ok === false) rej(new Error(j.error || 'Error al dispositiu.'));
         else res({ ms: Math.round(performance.now() - t0), bus: j.bus !== false, ver: j.ver || '' });
       });
       this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'ping', ts: Math.floor(Date.now() / 1000) }),
@@ -184,15 +184,15 @@ class Mqtt {
     });
   }
   send(id, text, cb, mid0) {
-    if (!this.connected) return Promise.reject(new Error('Sin conexión con el broker.'));
-    if (!isOnline(id)) return Promise.reject(new Error('El dispositivo está inactivo.'));
+    if (!this.connected) return Promise.reject(new Error('Sense connexió amb el broker.'));
+    if (!isOnline(id)) return Promise.reject(new Error('El dispositiu està inactiu.'));
     const mid = mid0 || uid();
     return new Promise((res, rej) => {
-      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('El dispositivo no confirmó a tiempo.')); }, 45000);
+      const to = setTimeout(() => { this.pending.delete(mid); rej(new Error('El dispositiu no ha confirmat a temps.')); }, 45000);
       this.pending.set(mid, j => {
         if (j.stage === 'received') return cb('delivered');
         clearTimeout(to); this.pending.delete(mid);
-        if (j.ok) { cb('said'); res(); } else rej(new Error(j.error || 'Error en el dispositivo.'));
+        if (j.ok) { cb('said'); res(); } else rej(new Error(j.error || 'Error al dispositiu.'));
       });
       this.c.publish(`${this.p}/${id}/cmd`, JSON.stringify({ id: mid, type: 'say', text, from: S.settings.name || undefined, ts: Math.floor(Date.now() / 1000) }),
         { qos: 1 }, err => { if (err) { clearTimeout(to); rej(err); } else cb('sent'); });
@@ -211,7 +211,7 @@ function useTransport() {
 const btSupported = () => !!navigator.bluetooth;
 async function scanBT() {
   if (S.settings.mode === 'demo') { await sleep(2000); return { name: 'IAIA-DEMO', code: 'IAIA-DEMO-0001' }; }
-  if (!btSupported()) throw new Error('Este navegador no permite Bluetooth web. Usa el código de la etiqueta.');
+  if (!btSupported()) throw new Error('Aquest navegador no permet Bluetooth web. Fes servir el codi de l’etiqueta.');
   const d = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'IAIA-' }], optionalServices: [BT_SERVICE] });
   try {
     const g = await d.gatt.connect(); const srv = await g.getPrimaryService(BT_SERVICE);
@@ -228,13 +228,13 @@ const ICONS = {
 };
 function tabbar(h) {
   const t = (href, key, label, on) => `<a href="#${href}" class="${on ? 'act' : ''}">${ICONS[key]}${label}</a>`;
-  return `<nav class="tabbar">${t('inicio', 'home', 'Inicio', !['nuevo', 'ajustes'].includes(h))}${t('nuevo', 'plus', 'Añadir', h === 'nuevo')}${t('ajustes', 'gear', 'Ajustes', h === 'ajustes')}</nav>`;
+  return `<nav class="tabbar">${t('inicio', 'home', 'Inici', !['nuevo', 'ajustes'].includes(h))}${t('nuevo', 'plus', 'Afegeix', h === 'nuevo')}${t('ajustes', 'gear', 'Configuració', h === 'ajustes')}</nav>`;
 }
 function connBadge() {
   const { kind, msg } = S.conn;
-  if (kind === 'demo') return '<span class="badge demo">Modo demo</span>';
-  if (kind === 'ok') return '<span class="badge ok">Conectado</span>';
-  return `<span class="badge ${kind}" title="${esc(msg)}">${kind === 'err' ? 'Error' : 'Sin conexión'}</span>`;
+  if (kind === 'demo') return '<span class="badge demo">Mode demo</span>';
+  if (kind === 'ok') return '<span class="badge ok">Connectat</span>';
+  return `<span class="badge ${kind}" title="${esc(msg)}">${kind === 'err' ? 'Error' : 'Sense connexió'}</span>`;
 }
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 const standalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
@@ -242,8 +242,8 @@ let deferredInstall = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferredInstall = e; refresh(); });
 function installBanner() {
   if (standalone() || store.load('hideInstall', false)) return '';
-  if (isIOS) return `<div class="install"><span>📲 Para instalarla: pulsa <b>Compartir</b> y luego <b>«Añadir a pantalla de inicio»</b>.</span><button data-act="hideinstall" aria-label="Cerrar">×</button></div>`;
-  if (deferredInstall) return `<div class="install"><span>📲 Instala la app en tu móvil.</span><button class="btn small" style="margin-left:auto" data-act="install">Instalar</button><button data-act="hideinstall" style="margin-left:0" aria-label="Cerrar">×</button></div>`;
+  if (isIOS) return `<div class="install"><span>📲 Per instal·lar-la: prem <b>Comparteix</b> i després <b>«Afegeix a la pantalla d’inici»</b>.</span><button data-act="hideinstall" aria-label="Tanca">×</button></div>`;
+  if (deferredInstall) return `<div class="install"><span>📲 Instal·la l’app al mòbil.</span><button class="btn small" style="margin-left:auto" data-act="install">Instal·la</button><button data-act="hideinstall" style="margin-left:0" aria-label="Tanca">×</button></div>`;
   return '';
 }
 
@@ -253,18 +253,18 @@ function vHome() {
     const o = isOnline(d.id), st = S.status[d.id];
     return `<a class="card ${o ? 'on' : ''}" href="#d-${esc(d.id)}">
       <div class="ico">🗣️</div>
-      <div class="meta"><div class="name">${esc(d.name)}</div><div class="small">${o ? 'Última señal ' + ago(st.ts) : 'Visto ' + ago(st && st.ts)}</div></div>
-      <span class="pill ${o ? 'on' : 'off'}"><i class="dot"></i>${o ? 'Activo' : 'Inactivo'}</span></a>`;
+      <div class="meta"><div class="name">${esc(d.name)}</div><div class="small">${o ? 'Darrera senyal ' + ago(st.ts) : 'Vist ' + ago(st && st.ts)}</div></div>
+      <span class="pill ${o ? 'on' : 'off'}"><i class="dot"></i>${o ? 'Actiu' : 'Inactiu'}</span></a>`;
   }).join('');
-  const empty = `<div class="empty"><div class="big">🔌</div><h2 style="margin:6px 0">Aún no tienes dispositivos</h2>
-    <p>Enchufa la Iaia, y añádela con el código de su etiqueta o por Bluetooth.</p>
-    <a class="btn" href="#nuevo">Añadir mi primera Iaia</a></div>`;
-  return `<header class="top"><div><h1>Iaia</h1><p class="sub">${S.devices.length ? `${on} de ${S.devices.length} activos` : 'Control remoto'}</p></div>${connBadge()}</header>
+  const empty = `<div class="empty"><div class="big">🔌</div><h2 style="margin:6px 0">Encara no tens dispositius</h2>
+    <p>Endolla la Iaia i afegeix-la amb el codi de la seva etiqueta o per Bluetooth.</p>
+    <a class="btn" href="#nuevo">Afegeix la meva primera Iaia</a></div>`;
+  return `<header class="top"><div><h1>Iaia</h1><p class="sub">${S.devices.length ? `${on} de ${S.devices.length} actius` : 'Control remot'}</p></div>${connBadge()}</header>
     ${installBanner()}${S.devices.length ? cards : empty}`;
 }
 
 function stateLabel(st) {
-  return { sending: ['Enviando…', 'wait'], sent: ['Enviado', 'wait'], delivered: ['Recibido', 'wait'], said: ['✓ Dicho', 'ok'], spoken: ['Dicho', 'wait'], listening: ['👂 Escuchando…', 'wait'], replied: ['💬 Respondió', 'ok'], incoming: ['💌 De la Iaia', 'ok'], noreply: ['Sin respuesta', 'fail'], failed: ['✗ Falló', 'fail'] }[st] || ['', ''];
+  return { sending: ['Enviant…', 'wait'], sent: ['Enviat', 'wait'], delivered: ['Rebut', 'wait'], said: ['✓ Dit', 'ok'], spoken: ['Dit', 'wait'], listening: ['👂 Escoltant…', 'wait'], replied: ['💬 Ha respost', 'ok'], incoming: ['💌 De la Iaia', 'ok'], noreply: ['Sense resposta', 'fail'], failed: ['✗ Ha fallat', 'fail'] }[st] || ['', ''];
 }
 const HIST_TTL_MS = 7 * 86400000, HIST_MAX = 30;   // últimos 30 mensajes, caducidad de 7 días
 function histState(h) {
@@ -296,85 +296,85 @@ function pingHtml(id) {
   return `<ul class="log" style="margin-top:10px">${l.map(r => r.wait
     ? `<li><div><div>Esperando el pong…</div><div class="t">${hhmm(r.t)}</div></div><span class="st wait">…</span></li>`
     : r.ok
-      ? `<li><div><div>Pong en ${r.ms} ms</div><div class="t">${hhmm(r.t)}${r.ver ? ' · versión ' + esc(r.ver) : ''}${r.bus ? '' : ' · OVOS no responde'}</div></div><span class="st ${r.bus ? 'ok' : 'fail'}">${r.bus ? '✓ Pong' : '! Sin OVOS'}</span></li>`
-      : `<li><div><div>Sin pong</div><div class="t">${hhmm(r.t)} · ${esc(r.err)}</div></div><span class="st fail">✗ Falló</span></li>`).join('')}</ul>`;
+      ? `<li><div><div>Pong en ${r.ms} ms</div><div class="t">${hhmm(r.t)}${r.ver ? ' · versió ' + esc(r.ver) : ''}${r.bus ? '' : ' · OVOS no respon'}</div></div><span class="st ${r.bus ? 'ok' : 'fail'}">${r.bus ? '✓ Pong' : '! Sense OVOS'}</span></li>`
+      : `<li><div><div>Sense pong</div><div class="t">${hhmm(r.t)} · ${esc(r.err)}</div></div><span class="st fail">✗ Ha fallat</span></li>`).join('')}</ul>`;
 }
 function statusHtml(d) {
   const o = isOnline(d.id), st = S.status[d.id];
-  return `<span class="pill ${o ? 'on' : 'off'}"><i class="dot"></i>${o ? 'Activo' : 'Inactivo'}</span><div class="small sub" style="text-align:right;margin-top:6px">${o ? 'Señal ' + ago(st.ts) : 'Visto ' + ago(st && st.ts)}</div>`;
+  return `<span class="pill ${o ? 'on' : 'off'}"><i class="dot"></i>${o ? 'Actiu' : 'Inactiu'}</span><div class="small sub" style="text-align:right;margin-top:6px">${o ? 'Senyal ' + ago(st.ts) : 'Vist ' + ago(st && st.ts)}</div>`;
 }
 function vDev(d) {
   const o = isOnline(d.id);
-  return `<a class="back" href="#inicio">‹ Mis dispositivos</a>
+  return `<a class="back" href="#inicio">‹ Els meus dispositius</a>
     <div class="panel hero"><div><div class="name" id="dname">${esc(d.name)}</div><div class="sub">${esc(d.id)}</div></div><div id="dst">${statusHtml(d)}</div></div>
-    <div class="panel"><div class="row"><div><div style="font-weight:600">Comprobar conexión</div><div class="hint" style="margin:2px 0 0">Envía un ping y espera el pong de la Iaia. No habla.</div></div>
+    <div class="panel"><div class="row"><div><div style="font-weight:600">Comprova la connexió</div><div class="hint" style="margin:2px 0 0">Envia un ping i espera el pong de la Iaia. No parla.</div></div>
       <button class="btn small ghost" id="ping" data-act="ping">📡 Ping</button></div>
       <div id="pingres">${pingHtml(d.id)}</div></div>
-    <div class="panel"><label for="msg" style="margin-top:0">Mensaje para que lo diga en voz alta</label>
+    <div class="panel"><label for="msg" style="margin-top:0">Missatge perquè ho digui en veu alta</label>
       <textarea id="msg" maxlength="300">Hello World</textarea>
-      <div class="row"><span class="hint" style="margin:0">Lo dirá con la voz de Iaia, tal cual lo escribas. Mejor en catalán.</span><span class="count" id="cnt">11/300</span></div>
+      <div class="row"><span class="hint" style="margin:0">Ho dirà amb la veu de la Iaia, tal com ho escriguis. Millor en català.</span><span class="count" id="cnt">11/300</span></div>
       <div class="chips">${PRESETS.map(p => `<button class="chip" data-act="preset" data-t="${esc(p)}">${esc(p)}</button>`).join('')}</div>
-      <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Llamar y esperar respuesta</button>
-      <button class="btn block ghost" id="send" data-act="send" style="margin-top:8px" ${o ? '' : 'disabled'}>🔊 Solo que lo diga</button>
-      <p class="hint" style="margin-top:8px">«Llamar»: Iaia dice el mensaje, escucha una respuesta de la persona y te la envía.</p>
-      <p class="hint">${S.settings.name ? 'Enviaràs com a <b>' + esc(S.settings.name) + '</b>.' : 'Posa el teu nom a <a href="#ajustes">Ajustes</a> perquè la teva família sàpiga qui escriu.'}</p>
-      <p class="hint" id="sendhint">${o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.'}</p></div>
+      <button class="btn block" id="call" data-act="call" ${o ? '' : 'disabled'}>📞 Truca i espera resposta</button>
+      <button class="btn block ghost" id="send" data-act="send" style="margin-top:8px" ${o ? '' : 'disabled'}>🔊 Només que ho digui</button>
+      <p class="hint" style="margin-top:8px">«Truca»: la Iaia diu el missatge, escolta la resposta de la persona i te l’envia.</p>
+      <p class="hint">${S.settings.name ? 'Enviaràs com a <b>' + esc(S.settings.name) + '</b>.' : 'Posa el teu nom a <a href="#ajustes">Configuració</a> perquè la teva família sàpiga qui escriu.'}</p>
+      <p class="hint" id="sendhint">${o ? '' : 'Inactiva: no es pot enviar fins que torni a connectar-se.'}</p></div>
     <h2>Missatges recents</h2><p class="hint" style="margin:0 0 6px">Tots els familiars amb aquesta Iaia veuen els mateixos missatges (últims 30, 7 dies).</p><div class="panel" id="log">${logHtml(d.id)}</div>
-    <h2>Dispositivo</h2><div class="panel">
-      <label for="rn" style="margin-top:0">Nombre</label>
-      <div class="row"><input type="text" id="rn" value="${esc(d.name)}" maxlength="30"><button class="btn small ghost" data-act="rename">Guardar</button></div>
-      <div style="margin-top:14px"><button class="btn small danger" data-act="del">Eliminar dispositivo</button></div></div>`;
+    <h2>Dispositiu</h2><div class="panel">
+      <label for="rn" style="margin-top:0">Nom</label>
+      <div class="row"><input type="text" id="rn" value="${esc(d.name)}" maxlength="30"><button class="btn small ghost" data-act="rename">Desa</button></div>
+      <div style="margin-top:14px"><button class="btn small danger" data-act="del">Elimina el dispositiu</button></div></div>`;
 }
 
 function vAdd() {
   const a = S.add;
   const bar = `<div class="steps">${[1, 2, 3].map(i => `<i class="${i <= a.step ? 'on' : ''}"></i>`).join('')}</div>`;
-  const head = `<header class="top"><div><h1>Añadir Iaia</h1><p class="sub">Paso ${a.step} de 3</p></div>${connBadge()}</header>${bar}`;
+  const head = `<header class="top"><div><h1>Afegeix una Iaia</h1><p class="sub">Pas ${a.step} de 3</p></div>${connBadge()}</header>${bar}`;
   const err = a.err ? `<div class="note err">${esc(a.err)}</div>` : '';
   if (a.step === 1) {
-    const bt = btSupported() ? 'Disponible en este navegador.' : (S.settings.mode === 'demo' ? 'Aquí se simula. En iPhone no existe Bluetooth web.' : 'No disponible en este navegador (iPhone/Safari no lo permite).');
-    return head + `<p class="sub" style="margin-bottom:14px">Enchufa la Iaia a la corriente y espera a que diga que está lista.</p>
-      <button class="opt" data-act="method" data-m="code"><span class="ico">🏷️</span><div><b>Con el código de la etiqueta</b><span>Funciona en iPhone y Android. Escribe el número de serie IAIA-XXXX-XXXX.</span></div></button>
-      <button class="opt" data-act="method" data-m="bt"><span class="ico">📡</span><div><b>Con Bluetooth</b><span>${bt}</span></div></button>`;
+    const bt = btSupported() ? 'Disponible en aquest navegador.' : (S.settings.mode === 'demo' ? 'Aquí es simula. A l’iPhone no existeix el Bluetooth web.' : 'No disponible en aquest navegador (iPhone/Safari no ho permet).');
+    return head + `<p class="sub" style="margin-bottom:14px">Endolla la Iaia al corrent i espera que digui que està a punt.</p>
+      <button class="opt" data-act="method" data-m="code"><span class="ico">🏷️</span><div><b>Amb el codi de l’etiqueta</b><span>Funciona a iPhone i Android. Escriu el número de sèrie IAIA-XXXX-XXXX.</span></div></button>
+      <button class="opt" data-act="method" data-m="bt"><span class="ico">📡</span><div><b>Amb Bluetooth</b><span>${bt}</span></div></button>`;
   }
   if (a.step === 2 && a.method === 'code') {
-    return head + `<div class="panel"><label for="code" style="margin-top:0">Número de serie</label>
+    return head + `<div class="panel"><label for="code" style="margin-top:0">Número de sèrie</label>
       <input type="text" id="code" class="code" value="${esc(a.code)}" placeholder="IAIA-XXXX-XXXX" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
-      <p class="hint">Está en la etiqueta de la base de la Iaia.</p>${err}
-      ${S.settings.mode === 'demo' ? '<button class="chip" data-act="democode">Usar código de prueba</button>' : ''}</div>
-      <button class="btn block" id="pairbtn" data-act="pair" ${CODE_RE.test(a.code) && !a.busy ? '' : 'disabled'}>${a.busy ? 'Comprobando…' : 'Continuar'}</button>
-      <p style="text-align:center;margin-top:12px"><button class="chip" data-act="back1">‹ Cambiar método</button></p>`;
+      <p class="hint">És a l’etiqueta de la base de la Iaia.</p>${err}
+      ${S.settings.mode === 'demo' ? '<button class="chip" data-act="democode">Fes servir el codi de prova</button>' : ''}</div>
+      <button class="btn block" id="pairbtn" data-act="pair" ${CODE_RE.test(a.code) && !a.busy ? '' : 'disabled'}>${a.busy ? 'Comprovant…' : 'Continua'}</button>
+      <p style="text-align:center;margin-top:12px"><button class="chip" data-act="back1">‹ Canvia el mètode</button></p>`;
   }
   if (a.step === 2 && a.method === 'bt') {
-    return head + `<div class="panel" style="text-align:center">${a.busy ? '<div class="radar">📡</div><b>Buscando Iaia cerca…</b><p class="hint">Acerca el móvil a la Iaia.</p>' : '<div class="radar" style="animation:none">📡</div><p class="hint">Busca dispositivos «IAIA-…» por Bluetooth.</p>'}${err}</div>
-      <button class="btn block" data-act="scan" ${a.busy ? 'disabled' : ''}>${a.busy ? 'Buscando…' : 'Buscar por Bluetooth'}</button>
-      <p style="text-align:center;margin-top:12px"><button class="chip" data-act="back1">‹ Cambiar método</button></p>`;
+    return head + `<div class="panel" style="text-align:center">${a.busy ? '<div class="radar">📡</div><b>Cercant la Iaia a prop…</b><p class="hint">Acosta el mòbil a la Iaia.</p>' : '<div class="radar" style="animation:none">📡</div><p class="hint">Cerca dispositius «IAIA-…» per Bluetooth.</p>'}${err}</div>
+      <button class="btn block" data-act="scan" ${a.busy ? 'disabled' : ''}>${a.busy ? 'Cercant…' : 'Cerca per Bluetooth'}</button>
+      <p style="text-align:center;margin-top:12px"><button class="chip" data-act="back1">‹ Canvia el mètode</button></p>`;
   }
-  return head + `<div class="note ok">✓ Dispositivo encontrado: <b>${esc(a.code)}</b></div>
-    <div class="panel"><label for="nm" style="margin-top:0">¿Cómo la llamamos?</label>
-    <input type="text" id="nm" value="${esc(a.name)}" maxlength="30" placeholder="Iaia de la abuela"></div>
-    <button class="btn block" data-act="save">Añadir a mi lista</button>`;
+  return head + `<div class="note ok">✓ Dispositiu trobat: <b>${esc(a.code)}</b></div>
+    <div class="panel"><label for="nm" style="margin-top:0">Com la anomenem?</label>
+    <input type="text" id="nm" value="${esc(a.name)}" maxlength="30" placeholder="Iaia de l’àvia"></div>
+    <button class="btn block" data-act="save">Afegeix a la meva llista</button>`;
 }
 
 function vSet() {
   const s = S.settings, demo = s.mode === 'demo';
-  const sim = demo ? `<h2>Simulador</h2><div class="panel"><p class="hint" style="margin:0 0 6px">Apaga una Iaia simulada para ver el estado «Inactivo».</p>
-    ${S.devices.length ? S.devices.map(d => `<div class="sw"><span>${esc(d.name)}</span><input type="checkbox" class="tog" data-act="power" data-id="${esc(d.id)}" ${S.tr.isOn(d.id) ? 'checked' : ''}></div>`).join('') : '<p class="hint">Añade un dispositivo primero.</p>'}
-    <div class="sw"><span>Voz en el móvil al enviar</span><input type="checkbox" class="tog" data-act="sound" ${s.sound ? 'checked' : ''}></div></div>` : '';
-  const real = demo ? '' : `<div class="panel"><label for="url" style="margin-top:0">Broker MQTT (WebSocket seguro)</label>
+  const sim = demo ? `<h2>Simulador</h2><div class="panel"><p class="hint" style="margin:0 0 6px">Apaga una Iaia simulada per veure l’estat «Inactiu».</p>
+    ${S.devices.length ? S.devices.map(d => `<div class="sw"><span>${esc(d.name)}</span><input type="checkbox" class="tog" data-act="power" data-id="${esc(d.id)}" ${S.tr.isOn(d.id) ? 'checked' : ''}></div>`).join('') : '<p class="hint">Afegeix primer un dispositiu.</p>'}
+    <div class="sw"><span>Veu al mòbil en enviar</span><input type="checkbox" class="tog" data-act="sound" ${s.sound ? 'checked' : ''}></div></div>` : '';
+  const real = demo ? '' : `<div class="panel"><label for="url" style="margin-top:0">Broker MQTT (WebSocket segur)</label>
       <input type="url" id="url" value="${esc(s.url)}" placeholder="wss://broker.ejemplo.com:8884/mqtt" autocapitalize="off">
-      <label for="usr">Usuario</label><input type="text" id="usr" value="${esc(s.user)}" autocapitalize="off" autocomplete="off">
-      <label for="pw">Contraseña</label><input type="password" id="pw" value="${esc(s.pass)}" autocomplete="off">
-      <label for="pfx">Prefijo de temas</label><input type="text" id="pfx" value="${esc(s.prefix)}" autocapitalize="off">
-      <p class="hint">Se guardan solo en este móvil. Usa un usuario con permisos limitados a tus temas.</p>
-      <div style="margin-top:12px"><button class="btn small" data-act="saveconn">Guardar y conectar</button></div></div>`;
-  return `<header class="top"><div><h1>Ajustes</h1><p class="sub">Versión 0.1 (prototipo)</p></div>${connBadge()}</header>
-    <div class="seg"><button data-act="mode" data-m="demo" class="${demo ? 'act' : ''}">Demo</button><button data-act="mode" data-m="mqtt" class="${demo ? '' : 'act'}">Conexión real</button></div>
+      <label for="usr">Usuari</label><input type="text" id="usr" value="${esc(s.user)}" autocapitalize="off" autocomplete="off">
+      <label for="pw">Contrasenya</label><input type="password" id="pw" value="${esc(s.pass)}" autocomplete="off">
+      <label for="pfx">Prefix de temes</label><input type="text" id="pfx" value="${esc(s.prefix)}" autocapitalize="off">
+      <p class="hint">Es desen només en aquest mòbil. Fes servir un usuari amb permisos limitats als teus temes.</p>
+      <div style="margin-top:12px"><button class="btn small" data-act="saveconn">Desa i connecta</button></div></div>`;
+  return `<header class="top"><div><h1>Configuració</h1><p class="sub">Versió 0.1 (prototip)</p></div>${connBadge()}</header>
+    <div class="seg"><button data-act="mode" data-m="demo" class="${demo ? 'act' : ''}">Demo</button><button data-act="mode" data-m="mqtt" class="${demo ? '' : 'act'}">Connexió real</button></div>
     <div style="height:14px"></div>
     <h2>El teu nom</h2><div class="panel"><label for="myname" style="margin-top:0">Així et veurà la teva família als missatges</label>
       <div class="row"><input type="text" id="myname" value="${esc(s.name || '')}" maxlength="30" placeholder="Per exemple: Maria" autocomplete="off"><button class="btn small" data-act="savename">Desa</button></div></div>
     ${real}${sim}
-    <h2>Datos</h2><div class="panel"><button class="btn small danger" data-act="reset">Borrar todo en este móvil</button></div>`;
+    <h2>Dades</h2><div class="panel"><button class="btn small danger" data-act="reset">Esborra-ho tot en aquest mòbil</button></div>`;
 }
 
 /* ---------- render ---------- */
@@ -400,7 +400,7 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
     const pr = $('#pingres'); if (pr) pr.innerHTML = pingHtml(d.id);
     const busy = !!$('#call[data-busy],#send[data-busy]');
     ['#send', '#call'].forEach(q => { const b = $(q); if (b && !busy) b.disabled = !o; });
-    const hint = $('#sendhint'); if (hint) hint.textContent = o ? '' : 'Inactiva: no se puede enviar hasta que vuelva a conectarse.';
+    const hint = $('#sendhint'); if (hint) hint.textContent = o ? '' : 'Inactiva: no es pot enviar fins que torni a connectar-se.';
     return;
   }
   render(true);
@@ -410,17 +410,17 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
 function addLog(id, e) { (S.logs[id] = S.logs[id] || []).unshift(e); S.logs[id] = S.logs[id].slice(0, 30); saveLogs(); }
 async function doSend(id, ask) {
   const ta = $('#msg'), text = ta.value.trim();
-  if (!text) return toast('Escribe un mensaje primero.');
+  if (!text) return toast('Escriu primer un missatge.');
   const e = { mid: uid(), text, t: Date.now(), state: 'sending', ask: !!ask, from: S.settings.name || '' }; addLog(id, e); refresh();
   const btns = [$('#send'), $('#call')]; btns.forEach(b => { b.disabled = true; b.dataset.busy = '1'; });
   try {
     if (ask) {
       const r = await S.tr.ask(id, text, st => { e.state = st; saveLogs(); refresh(); }, e.mid);
-      if (r.text) { e.state = 'replied'; e.reply = r.text; toast('Ha respondido: ' + r.text.slice(0, 80)); }
-      else { e.state = 'noreply'; toast('La persona no ha respondido.'); }
+      if (r.text) { e.state = 'replied'; e.reply = r.text; toast('Ha respost: ' + r.text.slice(0, 80)); }
+      else { e.state = 'noreply'; toast('La persona no ha respost.'); }
     } else {
       await S.tr.send(id, text, st => { e.state = st; saveLogs(); refresh(); }, e.mid);
-      e.state = 'said'; toast('La Iaia ha hablado ✓');
+      e.state = 'said'; toast('La Iaia ha parlat ✓');
     }
   } catch (err) { e.state = 'failed'; e.err = err.message; toast(err.message); }
   saveLogs(); btns.forEach(b => { delete b.dataset.busy; }); refresh();
@@ -445,47 +445,47 @@ const actions = {
   call() { doSend(hash().slice(2), true); },
   ping() { doPing(hash().slice(2)); },
   rename() {
-    const id = hash().slice(2), v = $('#rn').value.trim(); if (!v) return toast('El nombre no puede estar vacío.');
-    dev(id).name = v; saveDevices(); $('#dname').textContent = v; toast('Nombre guardado');
+    const id = hash().slice(2), v = $('#rn').value.trim(); if (!v) return toast('El nom no pot estar buit.');
+    dev(id).name = v; saveDevices(); $('#dname').textContent = v; toast('Nom desat');
   },
   del(el) {
-    if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Pulsa otra vez para confirmar'; return; }
+    if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Prem una altra vegada per confirmar'; return; }
     const id = hash().slice(2); S.tr.unwatch(id);
     S.devices = S.devices.filter(d => d.id !== id); delete S.logs[id]; delete S.hist[id]; store.save('hist', S.hist); saveDevices(); saveLogs();
-    location.hash = 'inicio'; toast('Dispositivo eliminado');
+    location.hash = 'inicio'; toast('Dispositiu eliminat');
   },
   method(el) { S.add = Object.assign(S.add, { method: el.dataset.m, step: 2, err: '', code: '', busy: false }); render(); },
   back1() { S.add.step = 1; S.add.err = ''; render(); },
   democode() { S.add.code = 'IAIA-DEMO-0001'; render(); },
   async pair() {
     S.add.busy = true; S.add.err = ''; render();
-    try { const r = await S.tr.pair(S.add.code); if (dev(r.id)) throw new Error('Ese dispositivo ya está en tu lista.'); finishPair(r.id); }
+    try { const r = await S.tr.pair(S.add.code); if (dev(r.id)) throw new Error('Aquest dispositiu ja és a la teva llista.'); finishPair(r.id); }
     catch (e) { S.add.busy = false; S.add.err = e.message; render(); }
   },
   async scan() {
     S.add.busy = true; S.add.err = ''; render();
     try {
       const r = await scanBT();
-      if (CODE_RE.test(r.code)) { const p = await S.tr.pair(r.code); if (dev(p.id)) throw new Error('Ese dispositivo ya está en tu lista.'); finishPair(p.id); }
-      else { S.add.method = 'code'; S.add.busy = false; S.add.err = `Encontrada «${r.name}», pero falta confirmar: escribe el código de la etiqueta.`; render(); }
-    } catch (e) { S.add.busy = false; S.add.err = e.name === 'NotFoundError' ? 'No se seleccionó ningún dispositivo.' : e.message; render(); }
+      if (CODE_RE.test(r.code)) { const p = await S.tr.pair(r.code); if (dev(p.id)) throw new Error('Aquest dispositiu ja és a la teva llista.'); finishPair(p.id); }
+      else { S.add.method = 'code'; S.add.busy = false; S.add.err = `Trobada «${r.name}», però falta confirmar: escriu el codi de l’etiqueta.`; render(); }
+    } catch (e) { S.add.busy = false; S.add.err = e.name === 'NotFoundError' ? 'No s’ha seleccionat cap dispositiu.' : e.message; render(); }
   },
   save() {
     const name = ($('#nm').value || '').trim() || 'Iaia', id = S.add.code;
     S.devices.push({ id, name }); saveDevices(); S.tr.watch(id);
     S.add = { step: 1, method: null, code: '', name: 'Iaia', busy: false, err: '', found: '' };
-    location.hash = 'd-' + id; toast('Dispositivo añadido ✓');
+    location.hash = 'd-' + id; toast('Dispositiu afegit ✓');
   },
   mode(el) { S.settings.mode = el.dataset.m; store.save('settings', S.settings); useTransport(); render(); },
   saveconn() {
     Object.assign(S.settings, { url: $('#url').value.trim(), user: $('#usr').value.trim(), pass: $('#pw').value, prefix: $('#pfx').value.trim() || 'iaia' });
-    store.save('settings', S.settings); useTransport(); toast('Conectando…');
+    store.save('settings', S.settings); useTransport(); toast('Connectant…');
   },
-  power(el) { S.tr.setPower(el.dataset.id, el.checked); toast(el.checked ? 'Iaia encendida' : 'Iaia apagada'); },
+  power(el) { S.tr.setPower(el.dataset.id, el.checked); toast(el.checked ? 'Iaia encesa' : 'Iaia apagada'); },
   savename() { S.settings.name = ($('#myname').value || '').replace(/\s+/g, ' ').trim().slice(0, 30); store.save('settings', S.settings); toast(S.settings.name ? 'Nom desat: ' + S.settings.name : 'Nom esborrat'); },
   sound(el) { S.settings.sound = el.checked; store.save('settings', S.settings); },
   reset(el) {
-    if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Pulsa otra vez para confirmar'; return; }
+    if (!el.dataset.sure) { el.dataset.sure = 1; el.textContent = 'Prem una altra vegada per confirmar'; return; }
     try { Object.keys(localStorage).filter(k => k.startsWith('iaia.')).forEach(k => localStorage.removeItem(k)); } catch { }
     location.hash = 'inicio'; location.reload();
   }
