@@ -434,7 +434,7 @@ function voiceUI() {
     else if (b.getAttribute('data-busy') === 'veu') { b.removeAttribute('data-busy'); b.disabled = !isOnline(id); }
   });
   let h = '', cls = 'vbar';
-  if (voice.st === 'rec') h = `<div class="vtxt"><span class="rd"></span><b>Gravant…</b> Parla ara.</div>${voice.interim ? `<div class="vint">${esc(voice.interim)}</div>` : ''}<div class="vact"><button class="btn small" type="button" data-act="vtoggle">⏹ Atura</button><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
+  if (voice.st === 'rec') h = `<div class="vtxt"><span class="rd"></span><b>Gravant…</b> Parla ara, a prop del micròfon, i prem «Atura» quan acabis.</div>${joinCum([voice.acc, voice.fin, voice.interim]) ? `<div class="vint">${esc(joinCum([voice.acc, voice.fin, voice.interim]))}</div>` : ''}<div class="vact"><button class="btn small" type="button" data-act="vtoggle">⏹ Atura</button><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
   else if (voice.st === 'proc') h = `<div class="vtxt"><b>Transcrivint…</b></div><div class="vact"><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
   else if (voice.st === 'done') h = `<div class="vtxt">✔ <b>Text transcrit.</b> Revisa’l i corregeix-lo abans d’enviar-lo.</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna a gravar</button><button class="btn small ghost" type="button" data-act="vclear">Esborra</button></div>`;
   else if (voice.st === 'err') { cls += ' err'; h = `<div class="vtxt">⚠ ${esc(voice.msg)}</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna-ho a provar</button></div>`; }
@@ -447,30 +447,57 @@ function voiceAbort() {   // cancel·la sense tocar el text (canvi de vista, app
   if (r) { try { r.abort(); } catch (_) { } }
   voice.st = 'idle'; voice.msg = ''; voice.interim = '';
 }
-function voiceStart() {
-  if (voice.st === 'rec' || voice.st === 'proc') return;
-  const C = speechCtor(), ta = $('#msg'); if (!ta) return;
-  if (!C) return voiceSet('err', VOICE_ERR.unsupported);
-  let r; try { r = new C(); } catch (_) { return voiceSet('err', VOICE_ERR.unsupported); }
-  voice.base = ta.value === voice.last ? '' : ta.value;   // si el text dictat no s'ha tocat, es reemplaça; si no, s'afegeix al final
+function joinCum(parts) {   // Chrome Android repeteix el text acumulat en cada resultat: no s'afegeix el que ja hi és
+  let cur = '';
+  for (let p of parts) {
+    p = (p || '').replace(/\s+/g, ' ').trim(); if (!p) continue;
+    if (!cur || p.toLowerCase().startsWith(cur.toLowerCase())) cur = p;
+    else if (cur.toLowerCase().endsWith(p.toLowerCase())) continue;
+    else cur += ' ' + p;
+  }
+  return cur;
+}
+function voiceListen() {   // crea i engega un reconeixedor; si el navegador el talla abans d'hora, se'n pot engegar un altre
+  const C = speechCtor(); let r;
+  try { r = new C(); } catch (_) { return false; }
+  r.lang = 'ca-ES'; r.interimResults = true; r.maxAlternatives = 1;
+  r.continuous = !isIOS;   // sense tallar-se a la primera pausa (a iPhone és poc fiable, allà es manté curt)
   voice.fin = ''; voice.interim = ''; voice.err = '';
-  r.lang = 'ca-ES'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
   r.onresult = e => {
     if (r !== voice.rec) return;
-    let f = '', i2 = '';
-    for (let i = 0; i < e.results.length; i++) { const x = e.results[i]; (x.isFinal ? (f += x[0].transcript) : (i2 += x[0].transcript)); }
+    const fs = []; let i2 = '';
+    for (let i = 0; i < e.results.length; i++) { const x = e.results[i]; if (x.isFinal) fs.push(x[0].transcript); else i2 = x[0].transcript; }
+    const f = joinCum(fs);
     voice.fin = f; voice.interim = i2; if (voice.st === 'rec') voiceUI();
   };
-  r.onspeechend = () => { if (r === voice.rec && voice.st === 'rec') voiceSet('proc'); };
+  r.onspeechend = () => { if (r === voice.rec && voice.st === 'rec' && !r.continuous) voiceSet('proc'); };
   r.onerror = e => { if (r === voice.rec) voice.err = e.error || 'error'; };
   r.onend = () => voiceEnd(r);
-  voice.rec = r; voiceSet('rec');
-  try { r.start(); } catch (_) { voice.rec = null; voiceSet('err', 'No s’ha pogut iniciar el micròfon.'); }
+  voice.rec = r;
+  try { r.start(); } catch (_) { voice.rec = null; return false; }
+  return true;
+}
+function voiceStart() {
+  if (voice.st === 'rec' || voice.st === 'proc') return;
+  const ta = $('#msg'); if (!ta) return;
+  if (!speechCtor()) return voiceSet('err', VOICE_ERR.unsupported);
+  voice.base = ta.value === voice.last ? '' : ta.value;   // si el text dictat no s'ha tocat, es reemplaça; si no, s'afegeix al final
+  voice.acc = ''; voice.tries = 0;
+  voiceSet('rec');
+  if (!voiceListen()) voiceSet('err', 'No s’ha pogut iniciar el micròfon.');
 }
 function voiceEnd(r) {
   if (r !== voice.rec) return;
   clearTimeout(voice.timer); voice.rec = null;
-  const txt = (voice.fin || voice.interim).replace(/\s+/g, ' ').trim();
+  const txt = joinCum([voice.acc, voice.fin, voice.interim]);
+  // el navegador ha tallat sense que l'usuari parés: si no hi ha res, es reintenta (màx. 2 cops) abans de donar error
+  if (voice.st === 'rec' && !txt && voice.tries < 2 && (!voice.err || voice.err === 'no-speech')) {
+    voice.tries++; if (voiceListen()) return;
+  }
+  // el navegador ha tallat per una pausa però ja hi ha text: es continua escoltant fins que l'usuari premi «Atura»
+  if (voice.st === 'rec' && txt && !voice.err && voice.tries < 6) {
+    voice.tries++; voice.acc = txt; if (voiceListen()) return;
+  }
   if (!txt) {
     if (voice.err === 'aborted') return voiceSet('idle');
     return voiceSet('err', VOICE_ERR[voice.err] || VOICE_ERR['no-speech']);
@@ -485,7 +512,7 @@ function voiceStop() {
   if (voice.st !== 'rec' || !voice.rec) return;
   const r = voice.rec; voiceSet('proc');
   try { r.stop(); } catch (_) { }
-  voice.timer = setTimeout(() => { if (voice.rec === r) { voice.err = voice.fin || voice.interim ? '' : 'timeout'; try { r.abort(); } catch (_) { } voiceEnd(r); } }, 8000);
+  voice.timer = setTimeout(() => { if (voice.rec === r) { voice.err = (voice.acc || voice.fin || voice.interim) ? '' : 'timeout'; try { r.abort(); } catch (_) { } voiceEnd(r); } }, 8000);
 }
 
 /* ---------- acciones ---------- */
