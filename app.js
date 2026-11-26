@@ -410,7 +410,7 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
 }
 
 /* ---------- dictat per veu (Web Speech API, només al navegador; el text no s'envia fins que l'usuari ho decideix) ---------- */
-const voice = { st: 'idle', rec: null, base: '', last: '', fin: '', interim: '', err: '', msg: '', timer: null };
+const voice = { st: 'idle', rec: null, base: '', last: '', fin: '', interim: '', err: '', msg: '', timer: null, sid: 0, shared: null, endAt: 0, startT: null };
 const speechCtor = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 const VOICE_ERR = {
   'not-allowed': 'No tinc permís per al micròfon. Permet-lo als ajustos del navegador i torna-ho a provar.',
@@ -442,9 +442,10 @@ function voiceUI() {
 }
 function voiceSet(st, msg) { voice.st = st; voice.msg = msg || ''; voiceUI(); }
 function voiceAbort() {   // cancel·la sense tocar el text (canvi de vista, app en segon pla…)
-  clearTimeout(voice.timer);
+  clearTimeout(voice.timer); clearTimeout(voice.startT);
+  voice.sid++;                                   // els esdeveniments tardans de la sessió anterior s'ignoren
   const r = voice.rec; voice.rec = null;
-  if (r) { try { r.abort(); } catch (_) { } }
+  if (r) { try { r.abort(); } catch (_) { } voice.endAt = Date.now(); }
   voice.st = 'idle'; voice.msg = ''; voice.interim = '';
 }
 function joinCum(parts) {   // Chrome Android repeteix el text acumulat en cada resultat: no s'afegeix el que ja hi és
@@ -457,24 +458,41 @@ function joinCum(parts) {   // Chrome Android repeteix el text acumulat en cada 
   }
   return cur;
 }
-function voiceListen() {   // crea i engega un reconeixedor; si el navegador el talla abans d'hora, se'n pot engegar un altre
+function voiceListen() {   // engega una sessió d'escolta; si el navegador la talla abans d'hora, se'n pot engegar una altra
   const C = speechCtor(); let r;
-  try { r = new C(); } catch (_) { return false; }
+  // iPhone (WebKit): amb un reconeixedor nou a cada pulsació, el segon dictat sovint no rep àudio perquè Safari encara té
+  // el micròfon del primer. Per això a iOS es reutilitza SEMPRE el mateix objecte i s'espera una mica entre sessions.
+  if (isIOS && voice.shared) r = voice.shared;
+  else { try { r = new C(); } catch (_) { return false; } if (isIOS) voice.shared = r; }
+  const sid = ++voice.sid;
   r.lang = 'ca-ES'; r.interimResults = true; r.maxAlternatives = 1;
   r.continuous = !isIOS;   // sense tallar-se a la primera pausa (a iPhone és poc fiable, allà es manté curt)
   voice.fin = ''; voice.interim = ''; voice.err = '';
   r.onresult = e => {
-    if (r !== voice.rec) return;
+    if (sid !== voice.sid) return;
     const fs = []; let i2 = '';
     for (let i = 0; i < e.results.length; i++) { const x = e.results[i]; if (x.isFinal) fs.push(x[0].transcript); else i2 = x[0].transcript; }
     const f = joinCum(fs);
     voice.fin = f; voice.interim = i2; if (voice.st === 'rec') voiceUI();
   };
-  r.onspeechend = () => { if (r === voice.rec && voice.st === 'rec' && !r.continuous) voiceSet('proc'); };
-  r.onerror = e => { if (r === voice.rec) voice.err = e.error || 'error'; };
-  r.onend = () => voiceEnd(r);
+  r.onspeechend = () => { if (sid === voice.sid && voice.st === 'rec' && !r.continuous) voiceSet('proc'); };
+  r.onerror = e => { if (sid === voice.sid) voice.err = e.error || 'error'; };
+  r.onend = () => voiceEnd(sid);
   voice.rec = r;
-  try { r.start(); } catch (_) { voice.rec = null; return false; }
+  const fail = () => { if (sid === voice.sid) { voice.rec = null; voiceSet('err', 'No s’ha pogut iniciar el micròfon.'); } };
+  const go = n => {
+    if (sid !== voice.sid) return;
+    try { r.start(); }
+    catch (_) {   // iOS: «already started» si la sessió anterior encara no s'ha tancat del tot
+      if (isIOS && n < 3) { try { r.abort(); } catch (_) { } voice.startT = setTimeout(() => go(n + 1), 400); } else fail();
+    }
+  };
+  const wait = isIOS ? Math.max(0, 700 - (Date.now() - voice.endAt)) : 0;
+  if (wait > 0) voice.startT = setTimeout(() => go(0), wait);
+  else {
+    try { r.start(); }
+    catch (_) { if (isIOS) { try { r.abort(); } catch (_) { } voice.startT = setTimeout(() => go(1), 400); } else { voice.rec = null; return false; } }
+  }
   return true;
 }
 function voiceStart() {
@@ -486,12 +504,13 @@ function voiceStart() {
   voiceSet('rec');
   if (!voiceListen()) voiceSet('err', 'No s’ha pogut iniciar el micròfon.');
 }
-function voiceEnd(r) {
-  if (r !== voice.rec) return;
-  clearTimeout(voice.timer); voice.rec = null;
+function voiceEnd(sid) {
+  if (sid !== voice.sid || !voice.rec) return;
+  clearTimeout(voice.timer); voice.rec = null; voice.endAt = Date.now();
   const txt = joinCum([voice.acc, voice.fin, voice.interim]);
   // el navegador ha tallat sense que l'usuari parés: si no hi ha res, es reintenta (màx. 2 cops) abans de donar error
-  if (voice.st === 'rec' && !txt && voice.tries < 2 && (!voice.err || voice.err === 'no-speech')) {
+  const retryable = !voice.err || voice.err === 'no-speech' || (isIOS && voice.err === 'aborted');
+  if (voice.st === 'rec' && !txt && voice.tries < 2 && retryable) {
     voice.tries++; if (voiceListen()) return;
   }
   // el navegador ha tallat per una pausa però ja hi ha text: es continua escoltant fins que l'usuari premi «Atura»
@@ -499,8 +518,8 @@ function voiceEnd(r) {
     voice.tries++; voice.acc = txt; if (voiceListen()) return;
   }
   if (!txt) {
-    if (voice.err === 'aborted') return voiceSet('idle');
-    return voiceSet('err', VOICE_ERR[voice.err] || VOICE_ERR['no-speech']);
+    if (voice.err === 'aborted' && !isIOS) return voiceSet('idle');
+    return voiceSet('err', (VOICE_ERR[voice.err] || VOICE_ERR['no-speech']) + (isIOS && (!voice.err || voice.err === 'aborted' || voice.err === 'no-speech') ? ' Si continua sense sentir-me, tanca l’app i torna-la a obrir, o fes servir el micròfon del teclat.' : ''));
   }
   const ta = $('#msg'); if (!ta) return voiceSet('idle');
   const dict = txt.charAt(0).toUpperCase() + txt.slice(1);
@@ -510,9 +529,11 @@ function voiceEnd(r) {
 }
 function voiceStop() {
   if (voice.st !== 'rec' || !voice.rec) return;
-  const r = voice.rec; voiceSet('proc');
+  const r = voice.rec, sid = voice.sid; voiceSet('proc');
   try { r.stop(); } catch (_) { }
-  voice.timer = setTimeout(() => { if (voice.rec === r) { voice.err = (voice.acc || voice.fin || voice.interim) ? '' : 'timeout'; try { r.abort(); } catch (_) { } voiceEnd(r); } }, 8000);
+  voice.timer = setTimeout(() => {
+    if (sid === voice.sid && voice.rec === r) { voice.err = (voice.acc || voice.fin || voice.interim) ? '' : 'timeout'; try { r.abort(); } catch (_) { } voiceEnd(sid); }
+  }, 8000);
 }
 
 /* ---------- acciones ---------- */
