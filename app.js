@@ -410,7 +410,7 @@ function refresh() {   // actualizaciones en vivo sin tocar lo que el usuario es
 }
 
 /* ---------- dictat per veu (Web Speech API, només al navegador; el text no s'envia fins que l'usuari ho decideix) ---------- */
-const voice = { st: 'idle', rec: null, base: '', last: '', fin: '', interim: '', err: '', msg: '', timer: null, sid: 0, shared: null, endAt: 0, startT: null };
+const voice = { st: 'idle', rec: null, base: '', last: '', fin: '', interim: '', err: '', msg: '', timer: null, trace: [], sid: 0, shared: null, endAt: 0, startT: null };
 const speechCtor = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 const VOICE_ERR = {
   'not-allowed': 'No tinc permís per al micròfon. Permet-lo als ajustos del navegador i torna-ho a provar.',
@@ -437,7 +437,7 @@ function voiceUI() {
   if (voice.st === 'rec') h = `<div class="vtxt"><span class="rd"></span><b>Gravant…</b> Parla ara, a prop del micròfon, i prem «Atura» quan acabis.</div>${joinCum([voice.acc, voice.fin, voice.interim]) ? `<div class="vint">${esc(joinCum([voice.acc, voice.fin, voice.interim]))}</div>` : ''}<div class="vact"><button class="btn small" type="button" data-act="vtoggle">⏹ Atura</button><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
   else if (voice.st === 'proc') h = `<div class="vtxt"><b>Transcrivint…</b></div><div class="vact"><button class="btn small ghost" type="button" data-act="vcancel">Cancel·la</button></div>`;
   else if (voice.st === 'done') h = `<div class="vtxt">✔ <b>Text transcrit.</b> Revisa’l i corregeix-lo abans d’enviar-lo.</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna a gravar</button><button class="btn small ghost" type="button" data-act="vclear">Esborra</button></div>`;
-  else if (voice.st === 'err') { cls += ' err'; h = `<div class="vtxt">⚠ ${esc(voice.msg)}</div><div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna-ho a provar</button></div>`; }
+  else if (voice.st === 'err') { cls += ' err'; h = `<div class="vtxt">⚠ ${esc(voice.msg)}</div>${voice.trace.length ? `<div class="vint">Diagnòstic: ${esc(voice.trace.join(' › '))}</div>` : ''}<div class="vact"><button class="btn small ghost" type="button" data-act="vstart">🎤 Torna-ho a provar</button></div>`; }
   bar.className = cls; bar.hidden = !h; bar.innerHTML = h;
 }
 function voiceSet(st, msg) { voice.st = st; voice.msg = msg || ''; voiceUI(); }
@@ -476,8 +476,11 @@ function voiceListen() {   // engega una sessió d'escolta; si el navegador la t
     voice.fin = f; voice.interim = i2; if (voice.st === 'rec') voiceUI();
   };
   r.onspeechend = () => { if (sid === voice.sid && voice.st === 'rec' && !r.continuous) voiceSet('proc'); };
-  r.onerror = e => { if (sid === voice.sid) voice.err = e.error || 'error'; };
-  r.onend = () => voiceEnd(sid);
+  const tr = n => { if (sid === voice.sid) { voice.trace.push(n); if (voice.trace.length > 24) voice.trace.shift(); } };
+  r.onstart = () => tr('start'); r.onaudiostart = () => tr('àudio'); r.onsoundstart = () => tr('so'); r.onspeechstart = () => tr('veu');
+  r.onaudioend = () => tr('fi-àudio'); r.onnomatch = () => tr('sense-coincidència');
+  r.onerror = e => { if (sid === voice.sid) { voice.err = e.error || 'error'; tr('error:' + voice.err); } };
+  r.onend = () => { tr('fi'); voiceEnd(sid); };
   voice.rec = r;
   const fail = () => { if (sid === voice.sid) { voice.rec = null; voiceSet('err', 'No s’ha pogut iniciar el micròfon.'); } };
   const go = n => {
@@ -500,7 +503,7 @@ function voiceStart() {
   const ta = $('#msg'); if (!ta) return;
   if (!speechCtor()) return voiceSet('err', VOICE_ERR.unsupported);
   voice.base = ta.value === voice.last ? '' : ta.value;   // si el text dictat no s'ha tocat, es reemplaça; si no, s'afegeix al final
-  voice.acc = ''; voice.tries = 0;
+  voice.acc = ''; voice.tries = 0; voice.trace = [];
   voiceSet('rec');
   if (!voiceListen()) voiceSet('err', 'No s’ha pogut iniciar el micròfon.');
 }
