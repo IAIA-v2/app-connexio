@@ -10,6 +10,21 @@ const CODE_RE = /^IAIA-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
 const STALE_MS = 90000;           // sin latido en 90 s => inactivo
 const PRESETS = ['Hello World', 'Hola, bon dia!', "És hora de prendre la medicació.", "Truco d'aquí a una estona."];
 
+/* ---------- aspecto (Material You) ---------- */
+const SEEDS = { verd: ['Verd', '#316a42'], blau: ['Blau', '#445e91'], lila: ['Lila', '#65558f'], rosa: ['Rosa', '#8d4a5d'], taronja: ['Taronja', '#8b4f26'], turquesa: ['Turquesa', '#006a63'] };
+const SCHEMES = [['system', 'Sistema'], ['light', 'Clar'], ['dark', 'Fosc']];
+const theme = Object.assign({ seed: 'verd', scheme: 'system' }, (() => { try { return JSON.parse(localStorage.getItem('iaia.theme')) || {}; } catch { return {}; } })());
+if (!SEEDS[theme.seed]) theme.seed = 'verd';
+if (!SCHEMES.some(x => x[0] === theme.scheme)) theme.scheme = 'system';
+function applyTheme() {
+  const r = document.documentElement;
+  r.dataset.seed = theme.seed;
+  if (theme.scheme === 'system') delete r.dataset.scheme; else r.dataset.scheme = theme.scheme;
+  const c = getComputedStyle(r).getPropertyValue('--m-surface').trim();   // la barra del navegador/PWA toma el color de la superficie
+  const m = document.querySelector('meta[name="theme-color"]'); if (m && c) m.content = c;
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
+
 /* ---------- utilidades ---------- */
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -227,7 +242,7 @@ const ICONS = {
   gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>'
 };
 function tabbar(h) {
-  const t = (href, key, label, on) => `<a href="#${href}" class="${on ? 'act' : ''}">${ICONS[key]}${label}</a>`;
+  const t = (href, key, label, on) => `<a href="#${href}" class="${on ? 'act' : ''}"${on ? ' aria-current="page"' : ''}><span class="ind">${ICONS[key]}</span><span>${label}</span></a>`;
   return `<nav class="tabbar">${t('inicio', 'home', 'Inici', !['nuevo', 'ajustes'].includes(h))}${t('nuevo', 'plus', 'Afegeix', h === 'nuevo')}${t('ajustes', 'gear', 'Configuració', h === 'ajustes')}</nav>`;
 }
 function connBadge() {
@@ -372,7 +387,11 @@ function vSet() {
       <div style="margin-top:12px"><button class="btn small" data-act="saveconn">Desa i connecta</button></div></div>`;
   return `<header class="top"><div><h1>Configuració</h1><p class="sub">Versió 0.1 (prototip)</p></div>${connBadge()}</header>
     <div class="seg"><button data-act="mode" data-m="demo" class="${demo ? 'act' : ''}">Demo</button><button data-act="mode" data-m="mqtt" class="${demo ? '' : 'act'}">Connexió real</button></div>
-    <div style="height:14px"></div>
+    <h2>Aparença</h2><div class="panel">
+      <div class="seg" role="group" aria-label="Tema">${SCHEMES.map(([v, n]) => `<button data-act="scheme" data-v="${v}" class="${theme.scheme === v ? 'act' : ''}">${n}</button>`).join('')}</div>
+      <label>Color del tema</label>
+      <div class="swatches" role="group" aria-label="Color del tema">${Object.entries(SEEDS).map(([k, [n, c]]) => `<button class="swatch ${theme.seed === k ? 'act' : ''}" data-act="seed" data-v="${k}" style="background:${c}" aria-label="${n}" aria-pressed="${theme.seed === k}" title="${n}"></button>`).join('')}</div>
+    </div>
     <h2>El teu nom</h2><div class="panel"><label for="myname" style="margin-top:0">Així et veurà la teva família als missatges</label>
       <div class="row"><input type="text" id="myname" value="${esc(s.name || '')}" maxlength="30" placeholder="Per exemple: Maria" autocomplete="off"><button class="btn small" data-act="savename">Desa</button></div></div>
     ${real}${sim}
@@ -613,6 +632,8 @@ const actions = {
     S.add = { step: 1, method: null, code: '', name: 'Iaia', busy: false, err: '', found: '' };
     location.hash = 'd-' + id; toast('Dispositiu afegit ✓');
   },
+  scheme(el) { theme.scheme = el.dataset.v; store.save('theme', theme); applyTheme(); render(true); },
+  seed(el) { theme.seed = el.dataset.v; store.save('theme', theme); applyTheme(); render(true); },
   mode(el) { S.settings.mode = el.dataset.m; store.save('settings', S.settings); useTransport(); render(); },
   saveconn() {
     Object.assign(S.settings, { url: $('#url').value.trim(), user: $('#usr').value.trim(), pass: $('#pw').value, prefix: $('#pfx').value.trim() || 'iaia' });
@@ -642,6 +663,7 @@ window.addEventListener('hashchange', () => render());
 document.addEventListener('visibilitychange', () => { if (document.hidden && (voice.st === 'rec' || voice.st === 'proc')) { voiceAbort(); voiceUI(); } });
 
 /* ---------- arranque ---------- */
+applyTheme();
 useTransport();
 render();
 setInterval(() => { if (hash() !== 'nuevo' && hash() !== 'ajustes') refresh(); }, 10000);

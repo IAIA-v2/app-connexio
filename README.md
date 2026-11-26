@@ -128,6 +128,12 @@ Si la skill no está instalada, Iaia dice el mensaje igualmente y la app avisa d
 
 Limitaciones conocidas: la respuesta solo llega a la app si está abierta (no se guarda en el broker); y la transcripción es la del STT, con sus errores. Las respuestas son conversaciones privadas de una persona mayor: usa solo cuentas de la familia y el broker con TLS.
 
+## Aspecto (Material You)
+
+La interfaz sigue Material 3: colores tonales, formas redondeadas, barra inferior con indicador, botones tonales y modo claro/oscuro. En **Configuració → Aparença** se elige el tema (Sistema, Clar o Fosc) y el color (verd, blau, lila, rosa, taronja, turquesa); se guarda en el móvil.
+
+Las paletas están en `theme.css` y se generan con la librería oficial `@material/material-color-utilities` (esquema `SchemeTonalSpot`, una paleta por color llavor, clara y oscura). No se editan a mano. Para añadir un color o cambiar uno, se regenera el fichero con esa librería y se añade el color a `SEEDS` en `app.js`. La web no puede leer el color del fondo de pantalla de Android, así que el color se elige a mano en lugar de ser dinámico.
+
 ## Recarga automática
 
 La app se recarga sola cada 5 minutos para coger la versión nueva y reconectar con el broker. Solo lo hace si nadie la está usando: no recarga durante una llamada, con un mensaje a medio escribir, ni en Ajustes o al añadir un dispositivo (en ese caso lo reintenta cada 30 s). Constante `AUTO_RELOAD_MS` en `app.js`.
